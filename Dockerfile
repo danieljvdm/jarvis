@@ -87,12 +87,11 @@ ENV NPM_CONFIG_PREFIX=/data/npm
 ENV NPM_CONFIG_CACHE=/data/npm-cache
 ENV PNPM_HOME=/data/pnpm
 ENV PNPM_STORE_DIR=/data/pnpm-store
-ENV HOMEBREW_PREFIX=/data/homebrew
-ENV HOMEBREW_CELLAR=/data/homebrew/Cellar
-ENV HOMEBREW_REPOSITORY=/data/homebrew
 ENV HOMEBREW_NO_AUTO_UPDATE=1
 ENV HOMEBREW_NO_ANALYTICS=1
-ENV PATH="/data/homebrew/bin:/data/homebrew/sbin:/data/npm/bin:/data/pnpm:${PATH}"
+# Brew on Linux/root always installs to /home/linuxbrew/.linuxbrew; init.sh symlinks
+# /home/linuxbrew → /data/linuxbrew so this path lands on the persistent volume.
+ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/data/npm/bin:/data/pnpm:${PATH}"
 
 WORKDIR /app
 

@@ -6,37 +6,46 @@ set -euo pipefail
 log() { echo "[init] $*"; }
 
 # ── Homebrew ──────────────────────────────────────────────────────────────────
-# Install to /data/homebrew on first boot. Subsequent boots skip this (fast).
-if [ ! -x "/data/homebrew/bin/brew" ]; then
-  log "Installing Homebrew to /data/homebrew (first boot, this takes a few minutes)..."
-  mkdir -p /data/homebrew
-  NONINTERACTIVE=1 HOMEBREW_PREFIX=/data/homebrew \
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+# Homebrew on Linux running as root always installs to /home/linuxbrew/.linuxbrew
+# regardless of HOMEBREW_PREFIX. We work around this by symlinking /home/linuxbrew
+# → /data/linuxbrew so brew's default path lands on the persistent volume.
+BREW_DATA_DIR="/data/linuxbrew"
+BREW_BIN="/home/linuxbrew/.linuxbrew/bin/brew"
+
+mkdir -p "$BREW_DATA_DIR"
+ln -sfn "$BREW_DATA_DIR" /home/linuxbrew
+
+if [ ! -x "$BREW_BIN" ]; then
+  log "Installing Homebrew (first boot, this takes a few minutes)..."
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   log "Homebrew installed."
 else
-  log "Homebrew already present at /data/homebrew — skipping install."
+  log "Homebrew already present — skipping install."
 fi
 
 # ── chezmoi dotfiles ──────────────────────────────────────────────────────────
 # CHEZMOI_DOTFILES_REPO: set this Railway variable to your dotfiles repo,
-# e.g. "danieljvdm/dotfiles" or a full HTTPS URL.
-# Optional: set CHEZMOI_GITHUB_ACCESS_TOKEN if the repo is private.
+# e.g. "danieljvdm/dotfiles".
+# CHEZMOI_GITHUB_ACCESS_TOKEN: set if the repo is private.
 CHEZMOI_SOURCE="/data/.local/share/chezmoi"
 
 if [ -n "${CHEZMOI_DOTFILES_REPO:-}" ]; then
+  # Build clone URL — embed token if provided so git doesn't prompt for credentials
   if [ -n "${CHEZMOI_GITHUB_ACCESS_TOKEN:-}" ]; then
-    export CHEZMOI_GITHUB_ACCESS_TOKEN
+    CLONE_URL="https://${CHEZMOI_GITHUB_ACCESS_TOKEN}@github.com/${CHEZMOI_DOTFILES_REPO}.git"
+  else
+    CLONE_URL="https://github.com/${CHEZMOI_DOTFILES_REPO}.git"
   fi
 
   if [ ! -d "$CHEZMOI_SOURCE/.git" ]; then
     log "Cloning dotfiles from ${CHEZMOI_DOTFILES_REPO}..."
-    chezmoi init --source "$CHEZMOI_SOURCE" "${CHEZMOI_DOTFILES_REPO}" || {
+    chezmoi init --source "$CHEZMOI_SOURCE" "$CLONE_URL" || {
       log "WARNING: chezmoi init failed — continuing without dotfiles"
     }
   fi
 
   log "Applying chezmoi dotfiles..."
-  chezmoi apply --source "$CHEZMOI_SOURCE" 2>/dev/null || {
+  chezmoi apply --source "$CHEZMOI_SOURCE" || {
     log "WARNING: chezmoi apply failed — continuing"
   }
 else
