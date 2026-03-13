@@ -101,3 +101,42 @@ if [ -n "$OB_BIN" ] && [ -f "$OB_AUTH" ]; then
 else
   log "Obsidian sync skipped (ob not installed or not logged in)."
 fi
+
+# ── QMD (semantic search over vault) ─────────────────────────────────────────
+# qmd index + models persist to $XDG_CACHE_HOME/qmd/ (→ /data/.cache/qmd/).
+# One-time setup after vault is present: already handled below (idempotent).
+QMD_BIN="$(command -v qmd 2>/dev/null || true)"
+if [ -z "$QMD_BIN" ]; then
+  log "Installing qmd..."
+  npm install -g @tobilu/qmd
+  QMD_BIN="$(command -v qmd 2>/dev/null || true)"
+fi
+
+if [ -n "$QMD_BIN" ]; then
+  # Register obsidian collection if not already present
+  if ! "$QMD_BIN" status 2>/dev/null | grep -q "obsidian"; then
+    log "Registering qmd obsidian collection..."
+    "$QMD_BIN" collection add /data/vaults --name obsidian --mask "**/*.md" \
+      || log "WARNING: qmd collection add failed"
+  fi
+  # Background embed (updates index after sync brings in new/changed notes)
+  if [ -d /data/vaults ] && [ -n "$(ls -A /data/vaults 2>/dev/null)" ]; then
+    log "Starting qmd background embed..."
+    mkdir -p /data/.cache/qmd
+    ("$QMD_BIN" embed --collection obsidian >> /data/.cache/qmd/embed.log 2>&1) &
+  fi
+fi
+
+# ── openclaw skills ───────────────────────────────────────────────────────────
+# Skills in /app/src/skills are baked into the image; symlink into ~/.agents/skills/
+# so openclaw can discover them. Existing symlinks are left as-is.
+SKILLS_DIR="${HOME}/.agents/skills"
+mkdir -p "$SKILLS_DIR"
+for skill_src in /app/src/skills/*/; do
+  skill_name="$(basename "$skill_src")"
+  target="$SKILLS_DIR/$skill_name"
+  if [ ! -e "$target" ]; then
+    log "Linking skill: $skill_name"
+    ln -s "/app/src/skills/${skill_name}" "$target"
+  fi
+done
