@@ -46,7 +46,7 @@ ENV NODE_ENV=production
 #   - build-essential, file, procps: Homebrew build requirements
 #   - tmux, ripgrep, fzf: dev tools (baked in so they're always available)
 #   - gnupg, curl: needed for 1Password CLI apt repo setup
-# neovim: installed separately below from GitHub releases (apt version too old)
+# neovim is installed via brew at runtime (init.sh) so it persists and stays current.
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -71,18 +71,6 @@ RUN apt-get update \
   && apt-get update \
   && apt-get install -y --no-install-recommends 1password-cli \
   && rm -rf /var/lib/apt/lists/*
-
-# neovim — install latest stable from GitHub releases (apt version is too old)
-RUN ARCH=$(dpkg --print-architecture) \
-  && case "$ARCH" in \
-       amd64) NVIM_ARCH="x86_64" ;; \
-       arm64) NVIM_ARCH="arm64" ;; \
-       *) echo "Unsupported arch: $ARCH" && exit 1 ;; \
-     esac \
-  && curl -Lo /tmp/nvim.tar.gz "https://github.com/neovim/neovim/releases/latest/download/nvim-linux-${NVIM_ARCH}.tar.gz" \
-  && tar -xzf /tmp/nvim.tar.gz -C /opt \
-  && ln -s "/opt/nvim-linux-${NVIM_ARCH}/bin/nvim" /usr/local/bin/nvim \
-  && rm /tmp/nvim.tar.gz
 
 # chezmoi — for dotfiles management
 RUN sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin

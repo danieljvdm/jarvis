@@ -23,6 +23,17 @@ else
   log "Homebrew already present — skipping install."
 fi
 
+# ── brew-managed tools ────────────────────────────────────────────────────────
+# Install on first boot; persisted to /data/linuxbrew across redeploys.
+for pkg in neovim; do
+  if ! "$BREW_BIN" list --formula "$pkg" &>/dev/null; then
+    log "Installing $pkg via brew..."
+    "$BREW_BIN" install "$pkg"
+  else
+    log "$pkg already installed via brew — skipping."
+  fi
+done
+
 # ── chezmoi dotfiles ──────────────────────────────────────────────────────────
 # CHEZMOI_DOTFILES_REPO: set this Railway variable to your dotfiles repo,
 # e.g. "danieljvdm/dotfiles".
