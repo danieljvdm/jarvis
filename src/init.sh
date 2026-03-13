@@ -34,6 +34,25 @@ for pkg in neovim; do
   fi
 done
 
+# ── openclaw config patches ───────────────────────────────────────────────────
+# Ensure gateway.trustedProxies includes loopback so Railway's reverse proxy
+# doesn't cause WebSocket connections to be dropped with ECONNREFUSED/code 1006.
+OPENCLAW_CFG="/data/.clawdbot/openclaw.json"
+if [ -f "$OPENCLAW_CFG" ]; then
+  python3 - << 'PYEOF'
+import json, sys
+path = "/data/.clawdbot/openclaw.json"
+with open(path) as f:
+    cfg = json.load(f)
+gw = cfg.setdefault("gateway", {})
+if gw.get("trustedProxies") != ["loopback"]:
+    gw["trustedProxies"] = ["loopback"]
+    with open(path, "w") as f:
+        json.dump(cfg, f, indent=2)
+    print("[init] set gateway.trustedProxies = [loopback]")
+PYEOF
+fi
+
 # ── chezmoi dotfiles ──────────────────────────────────────────────────────────
 # CHEZMOI_DOTFILES_REPO: set this Railway variable to your dotfiles repo,
 # e.g. "danieljvdm/dotfiles".
