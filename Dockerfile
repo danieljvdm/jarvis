@@ -83,6 +83,7 @@ RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 # npm/pnpm globals  -> /data/npm, /data/pnpm
 # Homebrew          -> /data/homebrew  (installed at runtime on first boot)
 # chezmoi source    -> /data/.local/share/chezmoi  (cloned at runtime on first boot)
+ENV XDG_CONFIG_HOME=/data/.config
 ENV NPM_CONFIG_PREFIX=/data/npm
 ENV NPM_CONFIG_CACHE=/data/npm-cache
 ENV PNPM_HOME=/data/pnpm

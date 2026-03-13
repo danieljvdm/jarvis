@@ -82,3 +82,22 @@ else
   log "CHEZMOI_DOTFILES_REPO not set — skipping dotfiles setup."
   log "Set it in Railway variables to enable dotfiles on boot."
 fi
+
+# ── Obsidian sync ─────────────────────────────────────────────────────────────
+# ob stores credentials at $XDG_CONFIG_HOME/obsidian-headless/auth_token
+# (set XDG_CONFIG_HOME=/data/.config in Dockerfile so this persists).
+# Vault lives at /data/vaults. One-time setup (SSH in):
+#   ob login
+#   mkdir -p /data/vaults/my-vault && cd /data/vaults/my-vault
+#   ob sync-setup --vault "My Vault"
+OB_BIN="$(command -v ob 2>/dev/null || true)"
+OB_AUTH="${XDG_CONFIG_HOME}/obsidian-headless/auth_token"
+if [ -n "$OB_BIN" ] && [ -f "$OB_AUTH" ]; then
+  for vault_dir in /data/vaults/*/; do
+    [ -d "$vault_dir" ] || continue
+    log "Starting Obsidian sync for $vault_dir..."
+    (cd "$vault_dir" && "$OB_BIN" sync --continuous >> /data/vaults/sync.log 2>&1) &
+  done
+else
+  log "Obsidian sync skipped (ob not installed or not logged in)."
+fi
