@@ -38,10 +38,11 @@ done
 # Persist Tailscale state to /data so auth survives redeploys.
 # Set TS_AUTHKEY in Railway variables (reusable key, tagged tag:server).
 TS_STATE_DIR="/data/tailscale"
-mkdir -p "$TS_STATE_DIR"
+TS_SOCK="/var/run/tailscale/tailscaled.sock"
+mkdir -p "$TS_STATE_DIR" /var/run/tailscale
 log "Starting tailscaled..."
 tailscaled --state="${TS_STATE_DIR}/tailscaled.state" \
-  --socket="${TS_SOCKET}" \
+  --socket="${TS_SOCK}" \
   --tun=userspace-networking &
 sleep 2
 

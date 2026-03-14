@@ -99,7 +99,6 @@ ENV PNPM_HOME=/data/pnpm
 ENV PNPM_STORE_DIR=/data/pnpm-store
 ENV HOMEBREW_NO_AUTO_UPDATE=1
 ENV HOMEBREW_NO_ANALYTICS=1
-ENV TS_SOCKET=/data/tailscale/tailscaled.sock
 # Brew on Linux/root always installs to /home/linuxbrew/.linuxbrew; init.sh symlinks
 # /home/linuxbrew → /data/linuxbrew so this path lands on the persistent volume.
 ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/data/npm/bin:/data/pnpm:${PATH}"
