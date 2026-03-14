@@ -83,6 +83,14 @@ if ts.get("mode") != "serve":
     ts["mode"] = "serve"
     changed = True
     print("[init] set gateway.tailscale.mode = serve")
+ui = gw.setdefault("controlUi", {})
+ts_origin = "https://jarvis.tail51d7a2.ts.net"
+origins = ui.get("allowedOrigins", [])
+if ts_origin not in origins:
+    origins.append(ts_origin)
+    ui["allowedOrigins"] = origins
+    changed = True
+    print(f"[init] added {ts_origin} to controlUi.allowedOrigins")
 if changed:
     with open(path, "w") as f:
         json.dump(cfg, f, indent=2)
