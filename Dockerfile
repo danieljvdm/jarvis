@@ -64,13 +64,17 @@ RUN apt-get update \
     tmux \
     ripgrep \
     fzf \
+    zsh \
   && curl -sS https://downloads.1password.com/linux/keys/1password.asc \
     | gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg \
   && echo "deb [signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main" \
     | tee /etc/apt/sources.list.d/1password.list \
   && apt-get update \
   && apt-get install -y --no-install-recommends 1password-cli \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && chsh -s /bin/zsh
+
+ENV SHELL=/bin/zsh
 
 # chezmoi — for dotfiles management
 RUN sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
