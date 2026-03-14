@@ -58,6 +58,13 @@ else
   fi
 fi
 
+# Set up tailscale serve to proxy the gateway port over the tailnet.
+# This runs every boot since the serve config doesn't persist (ephemeral filesystem).
+if tailscale status &>/dev/null; then
+  log "Setting up tailscale serve for port 18789..."
+  tailscale serve --bg --yes 18789 || log "WARNING: tailscale serve failed (HTTPS may not be enabled on tailnet)"
+fi
+
 # ── openclaw config patches ───────────────────────────────────────────────────
 # - gateway.trustedProxies = ["loopback"] for Railway reverse proxy
 # - gateway.tailscale.mode = "serve" for tailnet-only dashboard access
