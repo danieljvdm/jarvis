@@ -34,22 +34,53 @@ for pkg in neovim; do
   fi
 done
 
+# ── Tailscale ─────────────────────────────────────────────────────────────────
+# Persist Tailscale state to /data so auth survives redeploys.
+# Set TS_AUTHKEY in Railway variables (reusable key, tagged tag:server).
+TS_STATE_DIR="/data/tailscale"
+mkdir -p "$TS_STATE_DIR"
+log "Starting tailscaled..."
+tailscaled --state="${TS_STATE_DIR}/tailscaled.state" \
+  --socket="${TS_STATE_DIR}/tailscaled.sock" \
+  --tun=userspace-networking &
+sleep 2
+
+if tailscale --socket="${TS_STATE_DIR}/tailscaled.sock" status &>/dev/null; then
+  log "Tailscale already authenticated."
+else
+  if [ -n "${TS_AUTHKEY:-}" ]; then
+    log "Authenticating Tailscale with auth key..."
+    tailscale --socket="${TS_STATE_DIR}/tailscaled.sock" up --authkey="${TS_AUTHKEY}" --hostname=jarvis
+  else
+    log "WARNING: Tailscale not authenticated and TS_AUTHKEY not set."
+    log "SSH in and run: tailscale --socket=${TS_STATE_DIR}/tailscaled.sock up"
+  fi
+fi
+
 # ── openclaw config patches ───────────────────────────────────────────────────
-# Ensure gateway.trustedProxies includes loopback so Railway's reverse proxy
-# doesn't cause WebSocket connections to be dropped with ECONNREFUSED/code 1006.
+# - gateway.trustedProxies = ["loopback"] for Railway reverse proxy
+# - gateway.tailscale.mode = "serve" for tailnet-only dashboard access
 OPENCLAW_CFG="/data/.clawdbot/openclaw.json"
 if [ -f "$OPENCLAW_CFG" ]; then
   python3 - << 'PYEOF'
-import json, sys
+import json
 path = "/data/.clawdbot/openclaw.json"
 with open(path) as f:
     cfg = json.load(f)
+changed = False
 gw = cfg.setdefault("gateway", {})
 if gw.get("trustedProxies") != ["loopback"]:
     gw["trustedProxies"] = ["loopback"]
+    changed = True
+    print("[init] set gateway.trustedProxies = [loopback]")
+ts = gw.setdefault("tailscale", {})
+if ts.get("mode") != "serve":
+    ts["mode"] = "serve"
+    changed = True
+    print("[init] set gateway.tailscale.mode = serve")
+if changed:
     with open(path, "w") as f:
         json.dump(cfg, f, indent=2)
-    print("[init] set gateway.trustedProxies = [loopback]")
 PYEOF
 fi
 

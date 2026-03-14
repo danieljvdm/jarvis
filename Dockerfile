@@ -69,8 +69,12 @@ RUN apt-get update \
     | gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg \
   && echo "deb [signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/$(dpkg --print-architecture) stable main" \
     | tee /etc/apt/sources.list.d/1password.list \
+  && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+    | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null \
+  && echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian bookworm main" \
+    | tee /etc/apt/sources.list.d/tailscale.list \
   && apt-get update \
-  && apt-get install -y --no-install-recommends 1password-cli \
+  && apt-get install -y --no-install-recommends 1password-cli tailscale \
   && rm -rf /var/lib/apt/lists/* \
   && chsh -s /bin/zsh
 
