@@ -41,19 +41,19 @@ TS_STATE_DIR="/data/tailscale"
 mkdir -p "$TS_STATE_DIR"
 log "Starting tailscaled..."
 tailscaled --state="${TS_STATE_DIR}/tailscaled.state" \
-  --socket="${TS_STATE_DIR}/tailscaled.sock" \
+  --socket="${TS_SOCKET}" \
   --tun=userspace-networking &
 sleep 2
 
-if tailscale --socket="${TS_STATE_DIR}/tailscaled.sock" status &>/dev/null; then
+if tailscale status &>/dev/null; then
   log "Tailscale already authenticated."
 else
   if [ -n "${TS_AUTHKEY:-}" ]; then
     log "Authenticating Tailscale with auth key..."
-    tailscale --socket="${TS_STATE_DIR}/tailscaled.sock" up --authkey="${TS_AUTHKEY}" --hostname=jarvis
+    tailscale up --authkey="${TS_AUTHKEY}" --hostname=jarvis
   else
     log "WARNING: Tailscale not authenticated and TS_AUTHKEY not set."
-    log "SSH in and run: tailscale --socket=${TS_STATE_DIR}/tailscaled.sock up"
+    log "SSH in and run: tailscale up"
   fi
 fi
 
