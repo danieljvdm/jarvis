@@ -69,6 +69,10 @@ with open(path) as f:
     cfg = json.load(f)
 changed = False
 gw = cfg.setdefault("gateway", {})
+if gw.get("bind") != "loopback":
+    gw["bind"] = "loopback"
+    changed = True
+    print("[init] set gateway.bind = loopback")
 if gw.get("trustedProxies") != ["loopback"]:
     gw["trustedProxies"] = ["loopback"]
     changed = True
