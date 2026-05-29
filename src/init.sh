@@ -68,6 +68,7 @@ fi
 # ── openclaw config patches ───────────────────────────────────────────────────
 # - gateway.trustedProxies = ["loopback"] for Railway reverse proxy
 # - gateway.tailscale.mode = "serve" for tailnet-only dashboard access
+# - codex-lb providers for OpenClaw model traffic
 OPENCLAW_CFG="/data/.clawdbot/openclaw.json"
 if [ -f "$OPENCLAW_CFG" ]; then
   python3 - << 'PYEOF'
@@ -98,9 +99,83 @@ if ts_origin not in origins:
     ui["allowedOrigins"] = origins
     changed = True
     print(f"[init] added {ts_origin} to controlUi.allowedOrigins")
+
+codex_lb_models = [
+    {
+        "id": "gpt-5.5",
+        "name": "GPT-5.5",
+        "reasoning": True,
+        "input": ["text", "image"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 272000,
+        "contextTokens": 200000,
+        "maxTokens": 128000,
+    },
+    {
+        "id": "gpt-5.4",
+        "name": "GPT-5.4",
+        "reasoning": True,
+        "input": ["text", "image"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 272000,
+        "contextTokens": 200000,
+        "maxTokens": 128000,
+    },
+    {
+        "id": "gpt-5.4-mini",
+        "name": "GPT-5.4 Mini",
+        "reasoning": True,
+        "input": ["text", "image"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 272000,
+        "contextTokens": 200000,
+        "maxTokens": 128000,
+    },
+]
+codex_lb_provider = {
+    "baseUrl": "http://127.0.0.1:2455/v1",
+    "api": "openai-completions",
+    "auth": "api-key",
+    "apiKey": "dummy",
+    "models": codex_lb_models,
+}
+models = cfg.setdefault("models", {})
+if models.get("mode") != "merge":
+    models["mode"] = "merge"
+    changed = True
+    print("[init] set models.mode = merge")
+providers = models.setdefault("providers", {})
+for provider_id in ("codex-lb", "openai-codex"):
+    if providers.get(provider_id) != codex_lb_provider:
+        providers[provider_id] = codex_lb_provider
+        changed = True
+        print(f"[init] set models.providers.{provider_id} = codex-lb")
+
+defaults = cfg.setdefault("agents", {}).setdefault("defaults", {})
+default_model = defaults.get("model")
+if not isinstance(default_model, dict):
+    default_model = {}
+if default_model.get("primary") != "codex-lb/gpt-5.5":
+    default_model["primary"] = "codex-lb/gpt-5.5"
+    defaults["model"] = default_model
+    changed = True
+    print("[init] set agents.defaults.model.primary = codex-lb/gpt-5.5")
+agent_models = defaults.setdefault("models", {})
+existing_gpt55 = agent_models.get("openai-codex/gpt-5.5")
+if not isinstance(existing_gpt55, dict):
+    existing_gpt55 = {"params": {"serviceTier": "fast"}}
+if agent_models.get("codex-lb/gpt-5.5") != existing_gpt55:
+    agent_models["codex-lb/gpt-5.5"] = existing_gpt55
+    changed = True
+    print("[init] added agents.defaults.models.codex-lb/gpt-5.5")
+if agent_models.get("codex-lb/gpt-5.4") != {}:
+    agent_models["codex-lb/gpt-5.4"] = {}
+    changed = True
+    print("[init] added agents.defaults.models.codex-lb/gpt-5.4")
 if changed:
     with open(path, "w") as f:
         json.dump(cfg, f, indent=2)
+        f.write("\n")
 PYEOF
 fi
 
