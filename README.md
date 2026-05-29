@@ -59,6 +59,26 @@ If you’re filing a bug, please include the output of:
 
 ## Getting chat tokens (so you don’t have to scramble)
 
+### Codex/OpenCode via codex-lb
+
+When `CHEZMOI_DOTFILES_REPO` is set, Jarvis gets the shared Codex/OpenCode
+config that points at `127.0.0.1:2455`. This image starts `codex-lb` on that
+port after account sessions have been seeded.
+
+Sessions persist at `/data/.codex-lb` on the Railway volume. The container also
+links `~/.codex-lb` there so an SSH session lands in the expected place.
+
+Seed from a Mac that already has working `codex-lb` accounts:
+
+```bash
+sqlite3 ~/.codex-lb/store.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+tar -C ~/.codex-lb -czf /tmp/codex-lb.tgz .
+railway ssh 'mkdir -p /data/.codex-lb && tar -xzf - -C /data/.codex-lb' < /tmp/codex-lb.tgz
+```
+
+Restart/redeploy Jarvis after the copy. Logs go to
+`/data/.local/state/codex-lb.log`.
+
 ### Telegram bot token
 1) Open Telegram and message **@BotFather**
 2) Run `/newbot` and follow the prompts

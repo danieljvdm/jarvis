@@ -134,6 +134,57 @@ else
   log "Set it in Railway variables to enable dotfiles on boot."
 fi
 
+# ── codex-lb ─────────────────────────────────────────────────────────────────
+# The shared chezmoi config points Codex/OpenCode at 127.0.0.1:2455. On macOS
+# launchd starts codex-lb; on Railway we run it as a background process here.
+case "${CODEX_LB_ENABLED:-1}" in
+  0|false|FALSE|no|NO)
+    log "codex-lb disabled by CODEX_LB_ENABLED."
+    ;;
+  *)
+    CODEX_LB_DATA_DIR="${CODEX_LB_DATA_DIR:-/data/.codex-lb}"
+    CODEX_LB_HOST="${CODEX_LB_HOST:-127.0.0.1}"
+    CODEX_LB_PORT="${CODEX_LB_PORT:-2455}"
+    CODEX_LB_LOG="${CODEX_LB_LOG:-/data/.local/state/codex-lb.log}"
+    CODEX_LB_HOME_LINK="${HOME}/.codex-lb"
+
+    mkdir -p "$CODEX_LB_DATA_DIR" "$(dirname "$CODEX_LB_LOG")" "$HOME"
+
+    if [ -L "$CODEX_LB_HOME_LINK" ]; then
+      ln -sfn "$CODEX_LB_DATA_DIR" "$CODEX_LB_HOME_LINK"
+    elif [ -d "$CODEX_LB_HOME_LINK" ]; then
+      if [ -z "$(find "$CODEX_LB_HOME_LINK" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+        rmdir "$CODEX_LB_HOME_LINK"
+        ln -s "$CODEX_LB_DATA_DIR" "$CODEX_LB_HOME_LINK"
+      else
+        log "WARNING: $CODEX_LB_HOME_LINK already exists and is not empty; codex-lb will use $CODEX_LB_DATA_DIR via HOME=/data."
+      fi
+    elif [ ! -e "$CODEX_LB_HOME_LINK" ]; then
+      ln -s "$CODEX_LB_DATA_DIR" "$CODEX_LB_HOME_LINK"
+    else
+      log "WARNING: $CODEX_LB_HOME_LINK exists and is not a directory/symlink; codex-lb will use $CODEX_LB_DATA_DIR via HOME=/data."
+    fi
+
+    if [ ! -f "$CODEX_LB_DATA_DIR/store.db" ]; then
+      log "codex-lb has no seeded sessions yet; copy ~/.codex-lb/ from a logged-in Mac to ${CODEX_LB_DATA_DIR}, then restart."
+    elif command -v uvx >/dev/null 2>&1; then
+      if pgrep -f "codex-lb.*--port ${CODEX_LB_PORT}" >/dev/null 2>&1; then
+        log "codex-lb already running on port ${CODEX_LB_PORT}."
+      else
+        log "Starting codex-lb on ${CODEX_LB_HOST}:${CODEX_LB_PORT}..."
+        (
+          cd /data
+          HOME=/data XDG_CONFIG_HOME=/data/.config XDG_CACHE_HOME=/data/.cache \
+          uvx codex-lb --host "$CODEX_LB_HOST" --port "$CODEX_LB_PORT" \
+            >> "$CODEX_LB_LOG" 2>&1
+        ) &
+      fi
+    else
+      log "WARNING: uvx is not installed; codex-lb was not started."
+    fi
+    ;;
+esac
+
 # ── Obsidian sync ─────────────────────────────────────────────────────────────
 # ob stores credentials at $XDG_CONFIG_HOME/obsidian-headless/auth_token
 # (set XDG_CONFIG_HOME=/data/.config in Dockerfile so this persists).

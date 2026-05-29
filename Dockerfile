@@ -83,6 +83,9 @@ ENV SHELL=/bin/zsh
 # chezmoi — for dotfiles management
 RUN sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
 
+# uv/uvx — used to run codex-lb in the Railway container.
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
 # pnpm — used by openclaw update and skill installs
 RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
