@@ -123,10 +123,16 @@ if [ -n "${CHEZMOI_DOTFILES_REPO:-}" ]; then
     chezmoi init --source "$CHEZMOI_SOURCE" "$CLONE_URL" || {
       log "WARNING: chezmoi init failed — continuing without dotfiles"
     }
+  else
+    log "Updating dotfiles from ${CHEZMOI_DOTFILES_REPO}..."
+    git -C "$CHEZMOI_SOURCE" remote set-url origin "$CLONE_URL" || true
+    git -C "$CHEZMOI_SOURCE" pull --ff-only || {
+      log "WARNING: dotfiles update failed — applying existing source"
+    }
   fi
 
   log "Applying chezmoi dotfiles..."
-  chezmoi apply --source "$CHEZMOI_SOURCE" || {
+  chezmoi apply --force --source "$CHEZMOI_SOURCE" || {
     log "WARNING: chezmoi apply failed — continuing"
   }
 else
