@@ -1,40 +1,17 @@
-# Build openclaw from source to avoid npm packaging gaps (some dist files are not shipped).
-FROM node:22-bookworm AS openclaw-build
-
-# Dependencies needed for openclaw build
-RUN apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    git \
-    ca-certificates \
-    curl \
-    python3 \
-    make \
-    g++ \
-  && rm -rf /var/lib/apt/lists/*
-
-# Install Bun (openclaw build uses it)
-RUN curl -fsSL https://bun.sh/install | bash
-ENV PATH="/root/.bun/bin:${PATH}"
-
-RUN corepack enable
-
+# Install OpenClaw from the published npm release package. Building the source
+# tree in Railway can hang in tsdown; the npm package ships compiled dist files.
+FROM node:22-bookworm AS openclaw-package
 WORKDIR /openclaw
 
-# Pin to a known-good ref (tag/branch). Override via Railway service variable.
+# Keep the legacy build arg name because Railway already has it configured.
 ARG OPENCLAW_GIT_REF=v2026.5.27
-RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
-
-# Patch: relax version requirements for packages that may reference unpublished versions.
 RUN set -eux; \
-  find ./extensions -name 'package.json' -type f | while read -r f; do \
-    sed -i -E 's/"openclaw"[[:space:]]*:[[:space:]]*">=[^"]+"/"openclaw": "*"/g' "$f"; \
-    sed -i -E 's/"openclaw"[[:space:]]*:[[:space:]]*"workspace:[^"]+"/"openclaw": "*"/g' "$f"; \
-  done
-
-RUN pnpm install --no-frozen-lockfile
-RUN pnpm build
-ENV OPENCLAW_PREFER_PNPM=1
-RUN pnpm ui:install && pnpm ui:build
+  OPENCLAW_VERSION="${OPENCLAW_GIT_REF#v}"; \
+  npm pack "openclaw@${OPENCLAW_VERSION}" --pack-destination /tmp; \
+  tar -xzf "/tmp/openclaw-${OPENCLAW_VERSION}.tgz" -C /openclaw --strip-components=1; \
+  npm install --omit=dev; \
+  npm cache clean --force; \
+  node dist/entry.js --version
 
 
 # Runtime image
@@ -112,8 +89,8 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev && npm cache clean --force
 
-# Copy built openclaw
-COPY --from=openclaw-build /openclaw /openclaw
+# Copy packaged openclaw
+COPY --from=openclaw-package /openclaw /openclaw
 
 # Provide an openclaw executable
 RUN printf '%s\n' '#!/usr/bin/env bash' 'exec node /openclaw/dist/entry.js "$@"' > /usr/local/bin/openclaw \
