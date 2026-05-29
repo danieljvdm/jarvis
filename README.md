@@ -80,6 +80,26 @@ railway ssh 'mkdir -p /data/.codex-lb && tar -xzf - -C /data/.codex-lb' < /tmp/c
 Restart/redeploy Jarvis after the copy. Logs go to
 `/data/.local/state/codex-lb.log`.
 
+## Deployment smoke checks
+
+After a deploy, run:
+
+```bash
+npm run smoke:railway
+```
+
+The smoke checker verifies the OpenClaw version, `/setup/healthz`, codex-lb,
+Codex config, and OpenCode config from inside the running container.
+
+For a portable host with normal SSH access:
+
+```bash
+npm run smoke:ssh -- root@example.com
+```
+
+See [docs/PORTABILITY.md](docs/PORTABILITY.md) for the runtime contract needed
+to move Jarvis between Railway, Fly.io, a VPS, or another Docker host.
+
 ### Telegram bot token
 1) Open Telegram and message **@BotFather**
 2) Run `/newbot` and follow the prompts

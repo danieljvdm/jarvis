@@ -10,7 +10,9 @@
     "start": "node src/server.js",
     "lint": "node -c src/server.js",
     "test": "node --test",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "smoke:railway": "node scripts/smoke.js --railway",
+    "smoke:ssh": "node scripts/smoke.js --ssh"
   },
   "dependencies": {
     "express": "^5.1.0",

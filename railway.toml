@@ -15,3 +15,4 @@ requiredMountPath = "/data"
 # can cause domain routing mismatches.
 OPENCLAW_STATE_DIR = "/data/.openclaw"
 OPENCLAW_WORKSPACE_DIR = "/data/workspace"
+OPENCLAW_PLUGIN_STAGE_DIR = "/data/.clawdbot/plugin-runtime-deps"
