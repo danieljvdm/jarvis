@@ -147,6 +147,7 @@ case "${CODEX_LB_ENABLED:-1}" in
     CODEX_LB_PORT="${CODEX_LB_PORT:-2455}"
     CODEX_LB_LOG="${CODEX_LB_LOG:-/data/.local/state/codex-lb.log}"
     CODEX_LB_HOME_LINK="${HOME}/.codex-lb"
+    CODEX_LB_VAR_LINK="/var/lib/codex-lb"
 
     mkdir -p "$CODEX_LB_DATA_DIR" "$(dirname "$CODEX_LB_LOG")" "$HOME"
 
@@ -163,6 +164,22 @@ case "${CODEX_LB_ENABLED:-1}" in
       ln -s "$CODEX_LB_DATA_DIR" "$CODEX_LB_HOME_LINK"
     else
       log "WARNING: $CODEX_LB_HOME_LINK exists and is not a directory/symlink; codex-lb will use $CODEX_LB_DATA_DIR via HOME=/data."
+    fi
+
+    mkdir -p /var/lib
+    if [ -L "$CODEX_LB_VAR_LINK" ]; then
+      ln -sfn "$CODEX_LB_DATA_DIR" "$CODEX_LB_VAR_LINK"
+    elif [ -d "$CODEX_LB_VAR_LINK" ]; then
+      if [ -z "$(find "$CODEX_LB_VAR_LINK" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+        rmdir "$CODEX_LB_VAR_LINK"
+        ln -s "$CODEX_LB_DATA_DIR" "$CODEX_LB_VAR_LINK"
+      else
+        log "WARNING: $CODEX_LB_VAR_LINK already exists and is not empty; codex-lb may use that store instead of $CODEX_LB_DATA_DIR."
+      fi
+    elif [ ! -e "$CODEX_LB_VAR_LINK" ]; then
+      ln -s "$CODEX_LB_DATA_DIR" "$CODEX_LB_VAR_LINK"
+    else
+      log "WARNING: $CODEX_LB_VAR_LINK exists and is not a directory/symlink; codex-lb may use that store instead of $CODEX_LB_DATA_DIR."
     fi
 
     if [ ! -f "$CODEX_LB_DATA_DIR/store.db" ]; then

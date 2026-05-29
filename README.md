@@ -65,8 +65,9 @@ When `CHEZMOI_DOTFILES_REPO` is set, Jarvis gets the shared Codex/OpenCode
 config that points at `127.0.0.1:2455`. This image starts `codex-lb` on that
 port after account sessions have been seeded.
 
-Sessions persist at `/data/.codex-lb` on the Railway volume. The container also
-links `~/.codex-lb` there so an SSH session lands in the expected place.
+Sessions persist at `/data/.codex-lb` on the Railway volume. The container links
+both `~/.codex-lb` and `/var/lib/codex-lb` there so SSH sessions and `codex-lb`
+itself use the same store.
 
 Seed from a Mac that already has working `codex-lb` accounts:
 
