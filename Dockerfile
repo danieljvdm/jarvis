@@ -21,7 +21,7 @@ RUN corepack enable
 WORKDIR /openclaw
 
 # Pin to a known-good ref (tag/branch). Override via Railway service variable.
-ARG OPENCLAW_GIT_REF=v2026.3.12
+ARG OPENCLAW_GIT_REF=v2026.5.27
 RUN git clone --depth 1 --branch "${OPENCLAW_GIT_REF}" https://github.com/openclaw/openclaw.git .
 
 # Patch: relax version requirements for packages that may reference unpublished versions.
