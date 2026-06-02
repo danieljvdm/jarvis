@@ -121,6 +121,11 @@ if [ "$CHECK_CODEX_LB" = "1" ]; then
     *) fail "OpenClaw model fallbacks missing codex-lb gpt-5.4/gpt-5.4-mini: $OPENCLAW_MODEL_CONFIG" ;;
   esac
 
+  OPENCLAW_TOOLS_CONFIG="$(openclaw config get tools --json 2>/dev/null)" || fail "OpenClaw tools config unavailable"
+  TOOLS_CHECK="$(printf '%s' "$OPENCLAW_TOOLS_CONFIG" | node -e 'const fs=require("node:fs"); const cfg=JSON.parse(fs.readFileSync(0,"utf8")); const required=["read","write","edit","memory_search","memory_get"]; const also=Array.isArray(cfg.alsoAllow)?cfg.alsoAllow:[]; const missing=required.filter((name)=>!also.includes(name)); const unsafeAlso=also.filter((name)=>["exec","process","web_search","web_fetch"].includes(name)); if(cfg.profile!=="minimal") throw new Error("profile="+JSON.stringify(cfg.profile)); if(Object.prototype.hasOwnProperty.call(cfg,"allow")) throw new Error("tools.allow should be unset"); if(cfg.toolSearch!==false) throw new Error("toolSearch="+JSON.stringify(cfg.toolSearch)); if(missing.length) throw new Error("missing alsoAllow "+missing.join(",")); if(unsafeAlso.length) throw new Error("unsafe alsoAllow "+unsafeAlso.join(",")); const deny=Array.isArray(cfg.deny)?cfg.deny:[]; for (const name of ["exec","process","web_search","web_fetch"]) { if(!deny.includes(name)) throw new Error("missing deny "+name); }' 2>&1)" ||
+    fail "OpenClaw codex-lb-safe tool catalog not configured: $TOOLS_CHECK"
+  pass "OpenClaw codex-lb-safe tool catalog configured"
+
   CODEX_CONFIG="/root/.codex/config.toml"
   [ -f "$CODEX_CONFIG" ] || CODEX_CONFIG="$HOME/.codex/config.toml"
   if [ -f "$CODEX_CONFIG" ] && grep -q 'model_provider = "codex-lb"' "$CODEX_CONFIG"; then

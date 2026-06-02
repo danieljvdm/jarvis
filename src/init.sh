@@ -181,6 +181,59 @@ if agent_models.get("codex-lb/gpt-5.4-mini") != {}:
     agent_models["codex-lb/gpt-5.4-mini"] = {}
     changed = True
     print("[init] added agents.defaults.models.codex-lb/gpt-5.4-mini")
+
+# codex-lb currently accepts small OpenClaw tool payloads, but returns upstream
+# internal errors when OpenClaw exposes the full coding catalog, especially exec.
+# Keep Jarvis on a small no-shell surface that still supports file and memory work.
+tools = cfg.setdefault("tools", {})
+if tools.get("profile") != "minimal":
+    tools["profile"] = "minimal"
+    changed = True
+    print("[init] set tools.profile = minimal")
+if "allow" in tools:
+    del tools["allow"]
+    changed = True
+    print("[init] removed tools.allow")
+safe_tools = ["read", "write", "edit", "memory_search", "memory_get"]
+if tools.get("alsoAllow") != safe_tools:
+    tools["alsoAllow"] = safe_tools
+    changed = True
+    print("[init] set tools.alsoAllow = read,write,edit,memory_search,memory_get")
+deny_tools = [
+    "agents_list",
+    "browser",
+    "canvas",
+    "cron",
+    "dir_fetch",
+    "dir_list",
+    "exec",
+    "file_fetch",
+    "file_write",
+    "gateway",
+    "image",
+    "image_generate",
+    "message",
+    "nodes",
+    "pdf",
+    "process",
+    "sessions_history",
+    "sessions_list",
+    "sessions_send",
+    "sessions_spawn",
+    "sessions_yield",
+    "subagents",
+    "tts",
+    "web_fetch",
+    "web_search",
+]
+if tools.get("deny") != deny_tools:
+    tools["deny"] = deny_tools
+    changed = True
+    print("[init] set tools.deny for codex-lb-safe catalog")
+if tools.get("toolSearch") is not False:
+    tools["toolSearch"] = False
+    changed = True
+    print("[init] set tools.toolSearch = false")
 if changed:
     with open(path, "w") as f:
         json.dump(cfg, f, indent=2)
