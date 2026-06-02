@@ -196,10 +196,11 @@ CHEZMOI_SOURCE="/data/.local/share/chezmoi"
 
 if [ -n "${CHEZMOI_DOTFILES_REPO:-}" ]; then
   # Railway may preserve the chezmoi source across image/user changes, which can
-  # make Git reject it as a dubious-ownership repo on the next boot.
+  # make Git reject it as a dubious-ownership repo on the next boot. Trust it at
+  # the system level because chezmoi owns /root/.gitconfig and may rewrite it.
   if command -v git >/dev/null 2>&1; then
-    git config --global --get-all safe.directory | grep -Fxq "$CHEZMOI_SOURCE" ||
-      git config --global --add safe.directory "$CHEZMOI_SOURCE" || true
+    git config --system --get-all safe.directory 2>/dev/null | grep -Fxq "$CHEZMOI_SOURCE" ||
+      git config --system --add safe.directory "$CHEZMOI_SOURCE" || true
   fi
 
   # Build clone URL — embed token if provided so git doesn't prompt for credentials
