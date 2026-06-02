@@ -111,6 +111,16 @@ if [ "$CHECK_CODEX_LB" = "1" ]; then
     *) fail "codex-lb models response looked wrong: $CODEX_LB_OUTPUT" ;;
   esac
 
+  OPENCLAW_MODEL_CONFIG="$(openclaw config get agents.defaults.model --json 2>/dev/null)" || fail "OpenClaw model config unavailable"
+  case "$OPENCLAW_MODEL_CONFIG" in
+    *'"primary":"codex-lb/gpt-5.5"'*|*'"primary": "codex-lb/gpt-5.5"'*) ;;
+    *) fail "OpenClaw primary model is not codex-lb/gpt-5.5: $OPENCLAW_MODEL_CONFIG" ;;
+  esac
+  case "$OPENCLAW_MODEL_CONFIG" in
+    *'"codex-lb/gpt-5.4"'*'"codex-lb/gpt-5.4-mini"'*) pass "OpenClaw model fallbacks configured" ;;
+    *) fail "OpenClaw model fallbacks missing codex-lb gpt-5.4/gpt-5.4-mini: $OPENCLAW_MODEL_CONFIG" ;;
+  esac
+
   CODEX_CONFIG="/root/.codex/config.toml"
   [ -f "$CODEX_CONFIG" ] || CODEX_CONFIG="$HOME/.codex/config.toml"
   if [ -f "$CODEX_CONFIG" ] && grep -q 'model_provider = "codex-lb"' "$CODEX_CONFIG"; then

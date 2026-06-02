@@ -157,9 +157,14 @@ if not isinstance(default_model, dict):
     default_model = {}
 if default_model.get("primary") != "codex-lb/gpt-5.5":
     default_model["primary"] = "codex-lb/gpt-5.5"
-    defaults["model"] = default_model
     changed = True
     print("[init] set agents.defaults.model.primary = codex-lb/gpt-5.5")
+fallback_models = ["codex-lb/gpt-5.4", "codex-lb/gpt-5.4-mini"]
+if default_model.get("fallbacks") != fallback_models:
+    default_model["fallbacks"] = fallback_models
+    changed = True
+    print("[init] set agents.defaults.model.fallbacks = codex-lb/gpt-5.4,codex-lb/gpt-5.4-mini")
+defaults["model"] = default_model
 agent_models = defaults.setdefault("models", {})
 existing_gpt55 = agent_models.get("openai-codex/gpt-5.5")
 if not isinstance(existing_gpt55, dict):
@@ -172,6 +177,10 @@ if agent_models.get("codex-lb/gpt-5.4") != {}:
     agent_models["codex-lb/gpt-5.4"] = {}
     changed = True
     print("[init] added agents.defaults.models.codex-lb/gpt-5.4")
+if agent_models.get("codex-lb/gpt-5.4-mini") != {}:
+    agent_models["codex-lb/gpt-5.4-mini"] = {}
+    changed = True
+    print("[init] added agents.defaults.models.codex-lb/gpt-5.4-mini")
 if changed:
     with open(path, "w") as f:
         json.dump(cfg, f, indent=2)
@@ -186,6 +195,13 @@ fi
 CHEZMOI_SOURCE="/data/.local/share/chezmoi"
 
 if [ -n "${CHEZMOI_DOTFILES_REPO:-}" ]; then
+  # Railway may preserve the chezmoi source across image/user changes, which can
+  # make Git reject it as a dubious-ownership repo on the next boot.
+  if command -v git >/dev/null 2>&1; then
+    git config --global --get-all safe.directory | grep -Fxq "$CHEZMOI_SOURCE" ||
+      git config --global --add safe.directory "$CHEZMOI_SOURCE" || true
+  fi
+
   # Build clone URL — embed token if provided so git doesn't prompt for credentials
   if [ -n "${CHEZMOI_GITHUB_ACCESS_TOKEN:-}" ]; then
     CLONE_URL="https://${CHEZMOI_GITHUB_ACCESS_TOKEN}@github.com/${CHEZMOI_DOTFILES_REPO}.git"
