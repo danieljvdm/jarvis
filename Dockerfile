@@ -96,7 +96,7 @@ RUN printf '%s\n' '#!/usr/bin/env bash' 'exec node /openclaw/dist/entry.js "$@"'
   && chmod +x /usr/local/bin/openclaw
 
 COPY src ./src
-RUN chmod +x /app/src/init.sh /app/src/start.sh
+RUN chmod +x /app/src/init.sh /app/src/start.sh /app/src/codex-lb-supervisor.sh
 
 EXPOSE 8080
 

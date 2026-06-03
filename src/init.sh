@@ -315,7 +315,7 @@ fi
 
 # ── codex-lb ─────────────────────────────────────────────────────────────────
 # The shared chezmoi config points Codex/OpenCode at 127.0.0.1:2455. On macOS
-# launchd starts codex-lb; in this container we run it as a background process.
+# launchd starts codex-lb; in this container start.sh supervises it after init.
 case "${CODEX_LB_ENABLED:-1}" in
   0|false|FALSE|no|NO)
     log "codex-lb disabled by CODEX_LB_ENABLED."
@@ -363,6 +363,8 @@ case "${CODEX_LB_ENABLED:-1}" in
 
     if [ ! -f "$CODEX_LB_DATA_DIR/store.db" ]; then
       log "codex-lb has no seeded sessions yet; copy ~/.codex-lb/ from a logged-in Mac to ${CODEX_LB_DATA_DIR}, then restart."
+    elif [ "${CODEX_LB_SUPERVISED:-0}" = "1" ]; then
+      log "codex-lb state prepared; start.sh will supervise ${CODEX_LB_HOST}:${CODEX_LB_PORT}."
     elif command -v uvx >/dev/null 2>&1; then
       if pgrep -f "codex-lb.*--port ${CODEX_LB_PORT}" >/dev/null 2>&1; then
         log "codex-lb already running on port ${CODEX_LB_PORT}."
@@ -421,7 +423,7 @@ if [ -n "$QMD_BIN" ]; then
   if [ -d /data/vaults ] && [ -n "$(ls -A /data/vaults 2>/dev/null)" ]; then
     log "Starting qmd background embed..."
     mkdir -p /data/.cache/qmd
-    ("$QMD_BIN" embed --collection obsidian >> /data/.cache/qmd/embed.log 2>&1) &
+    (nice -n 10 "$QMD_BIN" embed --collection obsidian >> /data/.cache/qmd/embed.log 2>&1) &
   fi
 fi
 
