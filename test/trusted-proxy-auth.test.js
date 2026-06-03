@@ -6,7 +6,9 @@ test("wrapper uses trusted-proxy auth only", () => {
   const src = fs.readFileSync(new URL("../src/server.js", import.meta.url), "utf8");
   assert.match(src, /const OPENCLAW_GATEWAY_AUTH_MODE = "trusted-proxy"/);
   assert.match(src, /cf-access-authenticated-user-email/);
-  assert.match(src, /gateway\.auth\.trustedProxy\.allowLoopback/);
+  assert.match(src, /allowLoopback:\s*true/);
+  assert.match(src, /function applyGatewayAuthConfig/);
+  assert.doesNotMatch(src, /runRequiredConfigCommand/);
   assert.doesNotMatch(src, /SETUP_BASIC_AUTH_ENABLED/);
   assert.doesNotMatch(src, /DASHBOARD_BASIC_AUTH_ENABLED/);
   assert.doesNotMatch(src, /SETUP_PASSWORD/);

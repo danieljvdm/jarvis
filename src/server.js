@@ -633,9 +633,11 @@ function runCmd(cmd, args, opts = {}) {
 
 function gatewayAuthSyncSignature() {
   return {
-    version: 2,
+    version: 3,
     mode: OPENCLAW_GATEWAY_AUTH_MODE,
     trustedProxyUserHeader: OPENCLAW_TRUSTED_PROXY_USER_HEADER,
+    gatewayBind: "loopback",
+    gatewayPort: INTERNAL_GATEWAY_PORT,
     trustedProxies: ["127.0.0.1"],
   };
 }
@@ -656,8 +658,31 @@ function readOpenClawConfig() {
   }
 }
 
+function writeOpenClawConfig(cfg) {
+  const p = configPath();
+  const next = JSON.stringify(cfg, null, 2) + "\n";
+  try {
+    if (fs.existsSync(p) && fs.readFileSync(p, "utf8") === next) return false;
+  } catch {
+    // Continue with a rewrite if the existing file cannot be read.
+  }
+
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const tmp = `${p}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, next, { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(tmp, p);
+  return true;
+}
+
 function hasOwn(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj ?? {}, key);
+}
+
+function ensureObject(parent, key) {
+  if (!parent[key] || typeof parent[key] !== "object" || Array.isArray(parent[key])) {
+    parent[key] = {};
+  }
+  return parent[key];
 }
 
 function stringArrayEquals(a, b) {
@@ -669,6 +694,8 @@ function gatewayAuthConfigLooksCurrent() {
   const gateway = cfg?.gateway;
   const auth = gateway?.auth;
   if (!gateway || !auth) return false;
+  if (gateway.bind !== "loopback") return false;
+  if (Number(gateway.port) !== INTERNAL_GATEWAY_PORT) return false;
   if (auth.mode !== OPENCLAW_GATEWAY_AUTH_MODE) return false;
   if (!stringArrayEquals(gateway.trustedProxies, ["127.0.0.1"])) return false;
 
@@ -681,6 +708,33 @@ function gatewayAuthConfigLooksCurrent() {
     !hasOwn(gateway.remote, "token") &&
     !hasOwn(gateway.remote, "password")
   );
+}
+
+function applyGatewayAuthConfig(cfg) {
+  if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) {
+    throw new Error(`Invalid OpenClaw config at ${configPath()}`);
+  }
+
+  const gateway = ensureObject(cfg, "gateway");
+  const auth = ensureObject(gateway, "auth");
+
+  gateway.bind = "loopback";
+  gateway.port = INTERNAL_GATEWAY_PORT;
+  gateway.trustedProxies = ["127.0.0.1"];
+
+  auth.mode = OPENCLAW_GATEWAY_AUTH_MODE;
+  auth.trustedProxy = {
+    userHeader: OPENCLAW_TRUSTED_PROXY_USER_HEADER,
+    allowLoopback: true,
+  };
+
+  delete auth.token;
+  delete auth.password;
+
+  if (gateway.remote && typeof gateway.remote === "object" && !Array.isArray(gateway.remote)) {
+    delete gateway.remote.token;
+    delete gateway.remote.password;
+  }
 }
 
 function currentConfigMtimeMs() {
@@ -712,14 +766,6 @@ function writeGatewayAuthSyncStamp(signature) {
   }
 }
 
-async function runRequiredConfigCommand(args, opts = {}) {
-  const result = await runCmd(OPENCLAW_NODE, clawArgs(["config", ...args]));
-  if (result.code !== 0 && !opts.optional) {
-    throw new Error(`openclaw config ${args[0] ?? ""} failed with code ${result.code}`);
-  }
-  return result;
-}
-
 async function syncGatewayAuthConfig(opts = {}) {
   const signature = gatewayAuthSyncSignature();
   if (!opts.force && gatewayAuthSyncIsCurrent(signature)) {
@@ -732,17 +778,10 @@ async function syncGatewayAuthConfig(opts = {}) {
     return;
   }
 
-  await runRequiredConfigCommand(["set", "gateway.auth.mode", OPENCLAW_GATEWAY_AUTH_MODE]);
-  await runRequiredConfigCommand(["set", "--json", "gateway.trustedProxies", JSON.stringify(["127.0.0.1"])]);
-  await runRequiredConfigCommand(["set", "gateway.auth.trustedProxy.userHeader", OPENCLAW_TRUSTED_PROXY_USER_HEADER]);
-  await runRequiredConfigCommand(["set", "--json", "gateway.auth.trustedProxy.allowLoopback", "true"]);
-
-  // Prevent stale Control UI credentials from being reused when the public host
-  // is protected by Cloudflare Access or another identity-aware proxy instead.
-  await runRequiredConfigCommand(["unset", "gateway.auth.token"], { optional: true });
-  await runRequiredConfigCommand(["unset", "gateway.auth.password"], { optional: true });
-  await runRequiredConfigCommand(["unset", "gateway.remote.token"], { optional: true });
-  await runRequiredConfigCommand(["unset", "gateway.remote.password"], { optional: true });
+  const cfg = readOpenClawConfig();
+  applyGatewayAuthConfig(cfg);
+  const changed = writeOpenClawConfig(cfg);
+  console.log(changed ? "[wrapper] gateway auth config written" : "[wrapper] gateway auth config unchanged");
   writeGatewayAuthSyncStamp(signature);
 }
 
@@ -782,16 +821,7 @@ app.post("/setup/api/run", async (req, res) => {
   // Optional setup (only after successful onboarding).
   if (ok) {
     // Ensure the gateway auth mode matches the wrapper/front-door security model.
-    await syncGatewayAuthConfig();
-    await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.bind", "loopback"]));
-    await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.port", String(INTERNAL_GATEWAY_PORT)]));
-
-    // Trust the local wrapper as a proxy hop so client detection remains correct
-    // when X-Forwarded-* headers are present.
-    await runCmd(
-      OPENCLAW_NODE,
-      clawArgs(["config", "set", "--json", "gateway.trustedProxies", JSON.stringify(["127.0.0.1"]) ]),
-    );
+    await syncGatewayAuthConfig({ force: true });
 
     // Optional: configure a custom OpenAI-compatible provider (base URL) for advanced users.
     if (payload.customProviderId?.trim() && payload.customProviderBaseUrl?.trim()) {
