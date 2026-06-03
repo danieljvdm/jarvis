@@ -1,5 +1,4 @@
 import childProcess from "node:child_process";
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,91 +7,26 @@ import express from "express";
 import httpProxy from "http-proxy";
 import * as tar from "tar";
 
-// Migrate deprecated CLAWDBOT_* env vars → OPENCLAW_* so existing Railway deployments
-// keep working. Users should update their Railway Variables to use the new names.
-for (const suffix of ["PUBLIC_PORT", "STATE_DIR", "WORKSPACE_DIR", "GATEWAY_TOKEN", "CONFIG_PATH"]) {
-  const oldKey = `CLAWDBOT_${suffix}`;
-  const newKey = `OPENCLAW_${suffix}`;
-  if (process.env[oldKey] && !process.env[newKey]) {
-    process.env[newKey] = process.env[oldKey];
-    // Best-effort compatibility shim for old Railway templates.
-    // Intentionally no warning: Railway templates can still set legacy keys and warnings are noisy.
-  }
-  // Avoid forwarding legacy variables into OpenClaw subprocesses.
-  // OpenClaw logs a warning when deprecated CLAWDBOT_* variables are present.
-  delete process.env[oldKey];
-}
-
-// Railway injects PORT at runtime and routes traffic to that port.
-// Do not force a different public port in the container image, or the service may
-// boot but the Railway domain will be routed to a different port.
-//
-// OPENCLAW_PUBLIC_PORT is kept as an escape hatch for non-Railway deployments.
-const PORT = Number.parseInt(process.env.PORT ?? process.env.OPENCLAW_PUBLIC_PORT ?? "3000", 10);
+const PORT = Number.parseInt(process.env.PORT ?? "8080", 10);
 
 // State/workspace
-// OpenClaw defaults to ~/.openclaw.
 const STATE_DIR =
   process.env.OPENCLAW_STATE_DIR?.trim() ||
-  path.join(os.homedir(), ".openclaw");
+  "/data/.openclaw";
 
 const WORKSPACE_DIR =
   process.env.OPENCLAW_WORKSPACE_DIR?.trim() ||
-  path.join(STATE_DIR, "workspace");
+  "/data/workspace";
 
-// Protect /setup with a user-provided password.
-const SETUP_PASSWORD = process.env.SETUP_PASSWORD?.trim();
-const SETUP_BASIC_AUTH_ENABLED = /^(1|true|yes|on)$/i.test(
-  process.env.SETUP_BASIC_AUTH_ENABLED ?? "",
-);
-const DASHBOARD_BASIC_AUTH_ENABLED = /^(1|true|yes|on)$/i.test(
-  process.env.DASHBOARD_BASIC_AUTH_ENABLED ?? "",
-);
-
-function resolveGatewayAuthMode() {
-  const raw = process.env.OPENCLAW_GATEWAY_AUTH_MODE?.trim() || "trusted-proxy";
-  if (["none", "token", "password", "trusted-proxy"].includes(raw)) return raw;
-  console.warn(`[wrapper] WARNING: unsupported OPENCLAW_GATEWAY_AUTH_MODE=${JSON.stringify(raw)}; using "trusted-proxy".`);
-  return "trusted-proxy";
-}
-
-const OPENCLAW_GATEWAY_AUTH_MODE = resolveGatewayAuthMode();
+const OPENCLAW_GATEWAY_AUTH_MODE = "trusted-proxy";
 const OPENCLAW_TRUSTED_PROXY_USER_HEADER =
   process.env.OPENCLAW_TRUSTED_PROXY_USER_HEADER?.trim() ||
   "cf-access-authenticated-user-email";
 const GATEWAY_AUTH_SYNC_STAMP = path.join(STATE_DIR, "gateway-auth-sync.json");
-const OPENCLAW_GATEWAY_PASSWORD = process.env.OPENCLAW_GATEWAY_PASSWORD?.trim();
 const OPENCLAW_PUBLIC_HOSTS = (process.env.OPENCLAW_PUBLIC_HOSTS ?? "")
   .split(",")
   .map((host) => host.trim().toLowerCase())
   .filter(Boolean);
-
-// Gateway admin token (protects OpenClaw gateway + Control UI).
-// Must be stable across restarts. If not provided via env, persist it in the state dir.
-function resolveGatewayToken() {
-  const envTok = process.env.OPENCLAW_GATEWAY_TOKEN?.trim();
-  if (envTok) return envTok;
-
-  const tokenPath = path.join(STATE_DIR, "gateway.token");
-  try {
-    const existing = fs.readFileSync(tokenPath, "utf8").trim();
-    if (existing) return existing;
-  } catch {
-    // ignore
-  }
-
-  const generated = crypto.randomBytes(32).toString("hex");
-  try {
-    fs.mkdirSync(STATE_DIR, { recursive: true });
-    fs.writeFileSync(tokenPath, generated, { encoding: "utf8", mode: 0o600 });
-  } catch {
-    // best-effort
-  }
-  return generated;
-}
-
-const OPENCLAW_GATEWAY_TOKEN = resolveGatewayToken();
-process.env.OPENCLAW_GATEWAY_TOKEN = OPENCLAW_GATEWAY_TOKEN;
 
 // Where the gateway will listen internally (we proxy to it).
 const INTERNAL_GATEWAY_PORT = Number.parseInt(process.env.INTERNAL_GATEWAY_PORT ?? "18789", 10);
@@ -135,33 +69,10 @@ function isConfigured() {
   }
 }
 
-// One-time migration: rename legacy config files to openclaw.json so existing
-// deployments that still have the old filename on their volume keep working.
-(function migrateLegacyConfigFile() {
-  // If the operator explicitly chose a config path, do not rename files in STATE_DIR.
-  if (process.env.OPENCLAW_CONFIG_PATH?.trim()) return;
-
-  const canonical = path.join(STATE_DIR, "openclaw.json");
-  if (fs.existsSync(canonical)) return;
-
-  for (const legacy of ["clawdbot.json", "moltbot.json"]) {
-    const legacyPath = path.join(STATE_DIR, legacy);
-    try {
-      if (fs.existsSync(legacyPath)) {
-        fs.renameSync(legacyPath, canonical);
-        console.log(`[migration] Renamed ${legacy} → openclaw.json`);
-        return;
-      }
-    } catch (err) {
-      console.warn(`[migration] Failed to rename ${legacy}: ${err}`);
-    }
-  }
-})();
-
 let gatewayProc = null;
 let gatewayStarting = null;
 
-// Debug breadcrumbs for common Railway failures (502 / "Application failed to respond").
+// Debug breadcrumbs for common reverse-proxy startup failures.
 let lastGatewayError = null;
 let lastGatewayExit = null;
 let lastDoctorOutput = null;
@@ -212,21 +123,15 @@ async function startGateway() {
     "--auth",
     OPENCLAW_GATEWAY_AUTH_MODE,
   ];
-  if (OPENCLAW_GATEWAY_AUTH_MODE === "token") {
-    args.push("--token", OPENCLAW_GATEWAY_TOKEN);
-  }
-  if (OPENCLAW_GATEWAY_AUTH_MODE === "password" && OPENCLAW_GATEWAY_PASSWORD) {
-    args.push("--password", OPENCLAW_GATEWAY_PASSWORD);
-  }
 
   const gatewayEnv = {
     ...process.env,
     OPENCLAW_STATE_DIR: STATE_DIR,
     OPENCLAW_WORKSPACE_DIR: WORKSPACE_DIR,
   };
-  if (OPENCLAW_GATEWAY_AUTH_MODE !== "token") {
-    delete gatewayEnv.OPENCLAW_GATEWAY_TOKEN;
-  }
+  delete gatewayEnv.OPENCLAW_GATEWAY_TOKEN;
+  delete gatewayEnv.OPENCLAW_GATEWAY_PASSWORD;
+  delete gatewayEnv.OPENCLAW_GATEWAY_AUTH_MODE;
 
   gatewayProc = childProcess.spawn(OPENCLAW_NODE, clawArgs(args), {
     stdio: "inherit",
@@ -304,36 +209,11 @@ async function restartGateway() {
   return ensureGatewayRunning();
 }
 
-function requireSetupAuth(req, res, next) {
-  if (!SETUP_BASIC_AUTH_ENABLED) return next();
-  if (!SETUP_PASSWORD) {
-    return res
-      .status(500)
-      .type("text/plain")
-      .send("SETUP_PASSWORD is not set. Set it before enabling SETUP_BASIC_AUTH_ENABLED.");
-  }
-
-  const header = req.headers.authorization || "";
-  const [scheme, encoded] = header.split(" ");
-  if (scheme !== "Basic" || !encoded) {
-    res.set("WWW-Authenticate", 'Basic realm="OpenClaw Setup"');
-    return res.status(401).send("Auth required");
-  }
-  const decoded = Buffer.from(encoded, "base64").toString("utf8");
-  const idx = decoded.indexOf(":");
-  const password = idx >= 0 ? decoded.slice(idx + 1) : "";
-  if (password !== SETUP_PASSWORD) {
-    res.set("WWW-Authenticate", 'Basic realm="OpenClaw Setup"');
-    return res.status(401).send("Invalid password");
-  }
-  return next();
-}
-
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "1mb" }));
 
-// Minimal health endpoint for Railway.
+// Minimal health endpoint for host/platform probes.
 app.get("/setup/healthz", (_req, res) => res.json({ ok: true }));
 
 function normalizeHost(host) {
@@ -375,7 +255,7 @@ async function probeGateway() {
   });
 }
 
-// Public health endpoint (no auth) so Railway can probe without /setup.
+// Public health endpoint so the host can probe without /setup.
 // Keep this free of secrets.
 app.get("/healthz", async (_req, res) => {
   let gatewayReachable = false;
@@ -404,13 +284,13 @@ app.get("/healthz", async (_req, res) => {
   });
 });
 
-app.get("/setup/app.js", requireSetupAuth, (_req, res) => {
+app.get("/setup/app.js", (_req, res) => {
   // Serve JS for /setup (kept external to avoid inline encoding/template issues)
   res.type("application/javascript");
   res.send(fs.readFileSync(path.join(process.cwd(), "src", "setup-app.js"), "utf8"));
 });
 
-app.get("/setup", requireSetupAuth, (_req, res) => {
+app.get("/setup", (_req, res) => {
   // No inline <script>: serve JS from /setup/app.js to avoid any encoding/template-literal issues.
   res.type("html").send(`<!doctype html>
 <html>
@@ -538,7 +418,7 @@ app.get("/setup", requireSetupAuth, (_req, res) => {
 
   <div class="card">
     <h2>2b) Advanced: Custom OpenAI-compatible provider (optional)</h2>
-    <p class="muted">Use this to configure an OpenAI-compatible API that requires a custom base URL (e.g. Ollama, vLLM, LM Studio, hosted proxies). You usually set the API key as a Railway variable and reference it here.</p>
+    <p class="muted">Use this to configure an OpenAI-compatible API that requires a custom base URL (e.g. Ollama, vLLM, LM Studio, hosted proxies). Set the API key as a host secret and reference it here.</p>
 
     <label>Provider id (e.g. ollama, deepseek, myproxy)</label>
     <input id="customProviderId" placeholder="ollama" />
@@ -628,7 +508,7 @@ const AUTH_GROUPS = [
   ]}
 ];
 
-app.get("/setup/api/status", requireSetupAuth, async (_req, res) => {
+app.get("/setup/api/status", async (_req, res) => {
   const version = await runCmd(OPENCLAW_NODE, clawArgs(["--version"]));
   const channelsHelp = await runCmd(OPENCLAW_NODE, clawArgs(["channels", "add", "--help"]));
 
@@ -641,7 +521,7 @@ app.get("/setup/api/status", requireSetupAuth, async (_req, res) => {
   });
 });
 
-app.get("/setup/api/auth-groups", requireSetupAuth, (_req, res) => {
+app.get("/setup/api/auth-groups", (_req, res) => {
   res.json({ ok: true, authGroups: AUTH_GROUPS });
 });
 
@@ -661,9 +541,7 @@ function buildOnboardArgs(payload) {
     "--gateway-port",
     String(INTERNAL_GATEWAY_PORT),
     "--gateway-auth",
-    "token",
-    "--gateway-token",
-    OPENCLAW_GATEWAY_TOKEN,
+    OPENCLAW_GATEWAY_AUTH_MODE,
     "--flow",
     payload.flow || "quickstart",
   ];
@@ -755,17 +633,10 @@ function runCmd(cmd, args, opts = {}) {
 
 function gatewayAuthSyncSignature() {
   return {
-    version: 1,
+    version: 2,
     mode: OPENCLAW_GATEWAY_AUTH_MODE,
-    trustedProxyUserHeader:
-      OPENCLAW_GATEWAY_AUTH_MODE === "trusted-proxy"
-        ? OPENCLAW_TRUSTED_PROXY_USER_HEADER
-        : null,
+    trustedProxyUserHeader: OPENCLAW_TRUSTED_PROXY_USER_HEADER,
     trustedProxies: ["127.0.0.1"],
-    tokenHash:
-      OPENCLAW_GATEWAY_AUTH_MODE === "token"
-        ? crypto.createHash("sha256").update(OPENCLAW_GATEWAY_TOKEN).digest("hex")
-        : null,
   };
 }
 
@@ -801,23 +672,15 @@ function gatewayAuthConfigLooksCurrent() {
   if (auth.mode !== OPENCLAW_GATEWAY_AUTH_MODE) return false;
   if (!stringArrayEquals(gateway.trustedProxies, ["127.0.0.1"])) return false;
 
-  if (OPENCLAW_GATEWAY_AUTH_MODE === "token") {
-    return auth.token === OPENCLAW_GATEWAY_TOKEN && gateway.remote?.token === OPENCLAW_GATEWAY_TOKEN;
-  }
-
-  if (OPENCLAW_GATEWAY_AUTH_MODE === "trusted-proxy") {
-    const trustedProxy = auth.trustedProxy;
-    return (
-      trustedProxy?.userHeader === OPENCLAW_TRUSTED_PROXY_USER_HEADER &&
-      trustedProxy?.allowLoopback === true &&
-      !hasOwn(auth, "token") &&
-      !hasOwn(auth, "password") &&
-      !hasOwn(gateway.remote, "token") &&
-      !hasOwn(gateway.remote, "password")
-    );
-  }
-
-  return !hasOwn(auth, "token") && !hasOwn(auth, "password");
+  const trustedProxy = auth.trustedProxy;
+  return (
+    trustedProxy?.userHeader === OPENCLAW_TRUSTED_PROXY_USER_HEADER &&
+    trustedProxy?.allowLoopback === true &&
+    !hasOwn(auth, "token") &&
+    !hasOwn(auth, "password") &&
+    !hasOwn(gateway.remote, "token") &&
+    !hasOwn(gateway.remote, "password")
+  );
 }
 
 function currentConfigMtimeMs() {
@@ -871,18 +734,8 @@ async function syncGatewayAuthConfig(opts = {}) {
 
   await runRequiredConfigCommand(["set", "gateway.auth.mode", OPENCLAW_GATEWAY_AUTH_MODE]);
   await runRequiredConfigCommand(["set", "--json", "gateway.trustedProxies", JSON.stringify(["127.0.0.1"])]);
-
-  if (OPENCLAW_GATEWAY_AUTH_MODE === "token") {
-    await runRequiredConfigCommand(["set", "gateway.auth.token", OPENCLAW_GATEWAY_TOKEN]);
-    await runRequiredConfigCommand(["set", "gateway.remote.token", OPENCLAW_GATEWAY_TOKEN]);
-    writeGatewayAuthSyncStamp(signature);
-    return;
-  }
-
-  if (OPENCLAW_GATEWAY_AUTH_MODE === "trusted-proxy") {
-    await runRequiredConfigCommand(["set", "gateway.auth.trustedProxy.userHeader", OPENCLAW_TRUSTED_PROXY_USER_HEADER]);
-    await runRequiredConfigCommand(["set", "--json", "gateway.auth.trustedProxy.allowLoopback", "true"]);
-  }
+  await runRequiredConfigCommand(["set", "gateway.auth.trustedProxy.userHeader", OPENCLAW_TRUSTED_PROXY_USER_HEADER]);
+  await runRequiredConfigCommand(["set", "--json", "gateway.auth.trustedProxy.allowLoopback", "true"]);
 
   // Prevent stale Control UI credentials from being reused when the public host
   // is protected by Cloudflare Access or another identity-aware proxy instead.
@@ -893,7 +746,7 @@ async function syncGatewayAuthConfig(opts = {}) {
   writeGatewayAuthSyncStamp(signature);
 }
 
-app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
+app.post("/setup/api/run", async (req, res) => {
   try {
     const respondJson = (status, body) => {
       if (res.writableEnded || res.headersSent) return;
@@ -933,8 +786,8 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
     await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.bind", "loopback"]));
     await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.port", String(INTERNAL_GATEWAY_PORT)]));
 
-    // Railway runs behind a reverse proxy. Trust loopback as a proxy hop so local client detection
-    // remains correct when X-Forwarded-* headers are present.
+    // Trust the local wrapper as a proxy hop so client detection remains correct
+    // when X-Forwarded-* headers are present.
     await runCmd(
       OPENCLAW_NODE,
       clawArgs(["config", "set", "--json", "gateway.trustedProxies", JSON.stringify(["127.0.0.1"]) ]),
@@ -1071,7 +924,7 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
   }
 });
 
-app.get("/setup/api/debug", requireSetupAuth, async (_req, res) => {
+app.get("/setup/api/debug", async (_req, res) => {
   const v = await runCmd(OPENCLAW_NODE, clawArgs(["--version"]));
   const help = await runCmd(OPENCLAW_NODE, clawArgs(["channels", "add", "--help"]));
 
@@ -1096,13 +949,10 @@ app.get("/setup/api/debug", requireSetupAuth, async (_req, res) => {
       internalGatewayPort: INTERNAL_GATEWAY_PORT,
       gatewayTarget: GATEWAY_TARGET,
       gatewayRunning: Boolean(gatewayProc),
-      gatewayTokenFromEnv: Boolean(process.env.OPENCLAW_GATEWAY_TOKEN?.trim()),
-      gatewayTokenPersisted: fs.existsSync(path.join(STATE_DIR, "gateway.token")),
       lastGatewayError,
       lastGatewayExit,
       lastDoctorAt,
       lastDoctorOutput,
-      railwayCommit: process.env.RAILWAY_GIT_COMMIT_SHA || null,
     },
     openclaw: {
       entry: OPENCLAW_ENTRY,
@@ -1174,7 +1024,7 @@ const ALLOWED_CONSOLE_COMMANDS = new Set([
   "openclaw.plugins.enable",
 ]);
 
-app.post("/setup/api/console/run", requireSetupAuth, async (req, res) => {
+app.post("/setup/api/console/run", async (req, res) => {
   const payload = req.body || {};
   const cmd = String(payload.cmd || "").trim();
   const arg = String(payload.arg || "").trim();
@@ -1264,7 +1114,7 @@ app.post("/setup/api/console/run", requireSetupAuth, async (req, res) => {
   }
 });
 
-app.get("/setup/api/config/raw", requireSetupAuth, async (_req, res) => {
+app.get("/setup/api/config/raw", async (_req, res) => {
   try {
     const p = configPath();
     const exists = fs.existsSync(p);
@@ -1275,7 +1125,7 @@ app.get("/setup/api/config/raw", requireSetupAuth, async (_req, res) => {
   }
 });
 
-app.post("/setup/api/config/raw", requireSetupAuth, async (req, res) => {
+app.post("/setup/api/config/raw", async (req, res) => {
   try {
     const content = String((req.body && req.body.content) || "");
     if (content.length > 500_000) {
@@ -1304,7 +1154,7 @@ app.post("/setup/api/config/raw", requireSetupAuth, async (req, res) => {
   }
 });
 
-app.post("/setup/api/pairing/approve", requireSetupAuth, async (req, res) => {
+app.post("/setup/api/pairing/approve", async (req, res) => {
   const { channel, code } = req.body || {};
   if (!channel || !code) {
     return res.status(400).json({ ok: false, error: "Missing channel or code" });
@@ -1314,14 +1164,14 @@ app.post("/setup/api/pairing/approve", requireSetupAuth, async (req, res) => {
 });
 
 // Device pairing helper (list + approve) to avoid needing SSH.
-app.get("/setup/api/devices/pending", requireSetupAuth, async (_req, res) => {
+app.get("/setup/api/devices/pending", async (_req, res) => {
   const r = await runCmd(OPENCLAW_NODE, clawArgs(["devices", "list"]));
   const output = redactSecrets(r.output);
   const requestIds = extractDeviceRequestIds(output);
   return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, requestIds, output });
 });
 
-app.post("/setup/api/devices/approve", requireSetupAuth, async (req, res) => {
+app.post("/setup/api/devices/approve", async (req, res) => {
   const requestId = String((req.body && req.body.requestId) || "").trim();
   if (!requestId) return res.status(400).json({ ok: false, error: "Missing device request ID" });
   if (!/^[A-Za-z0-9_-]+$/.test(requestId)) return res.status(400).json({ ok: false, error: "Invalid device request ID" });
@@ -1329,11 +1179,11 @@ app.post("/setup/api/devices/approve", requireSetupAuth, async (req, res) => {
   return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, output: redactSecrets(r.output) });
 });
 
-app.post("/setup/api/reset", requireSetupAuth, async (_req, res) => {
+app.post("/setup/api/reset", async (_req, res) => {
   // Reset: stop gateway (frees memory) + delete config file(s) so /setup can rerun.
   // Keep credentials/sessions/workspace by default.
   try {
-    // Stop gateway to avoid running gateway + onboard concurrently on small Railway instances.
+    // Stop gateway to avoid running gateway + onboard concurrently on small hosts.
     try {
       if (gatewayProc) {
         try { gatewayProc.kill("SIGTERM"); } catch {}
@@ -1355,7 +1205,7 @@ app.post("/setup/api/reset", requireSetupAuth, async (_req, res) => {
   }
 });
 
-app.get("/setup/export", requireSetupAuth, async (_req, res) => {
+app.get("/setup/export", async (_req, res) => {
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.mkdirSync(WORKSPACE_DIR, { recursive: true });
 
@@ -1442,14 +1292,14 @@ async function readBodyBuffer(req, maxBytes) {
 
 // Import a backup created by /setup/export.
 // This is intentionally limited to restoring into /data to avoid overwriting arbitrary host paths.
-app.post("/setup/import", requireSetupAuth, async (req, res) => {
+app.post("/setup/import", async (req, res) => {
   try {
     const dataRoot = "/data";
     if (!isUnderDir(STATE_DIR, dataRoot) || !isUnderDir(WORKSPACE_DIR, dataRoot)) {
       return res
         .status(400)
         .type("text/plain")
-        .send("Import is only supported when OPENCLAW_STATE_DIR and OPENCLAW_WORKSPACE_DIR are under /data (Railway volume).\n");
+        .send("Import is only supported when OPENCLAW_STATE_DIR and OPENCLAW_WORKSPACE_DIR are under /data.\n");
     }
 
     // Stop gateway before restore so we don't overwrite live files.
@@ -1513,46 +1363,7 @@ proxy.on("error", (err, _req, res) => {
   }
 });
 
-// --- Dashboard password protection ---
-// Optional extra password protection for the Control UI dashboard. This is off by
-// default because the gateway already has token + device pairing, and deployments
-// can put the whole public host behind Cloudflare Access or a similar SSO wall.
-function requireDashboardAuth(req, res, next) {
-  if (!DASHBOARD_BASIC_AUTH_ENABLED) return next();
-  if (req.path === "/healthz" || req.path === "/setup/healthz") return next();
-  if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth
-  if (!SETUP_PASSWORD) return next(); // no password configured → open
-  const header = req.headers.authorization || "";
-  const [scheme, encoded] = header.split(" ");
-  if (scheme !== "Basic" || !encoded) {
-    res.set("WWW-Authenticate", 'Basic realm="OpenClaw Dashboard"');
-    return res.status(401).send("Auth required");
-  }
-  const decoded = Buffer.from(encoded, "base64").toString("utf8");
-  const idx = decoded.indexOf(":");
-  const password = idx >= 0 ? decoded.slice(idx + 1) : "";
-  if (password !== SETUP_PASSWORD) {
-    res.set("WWW-Authenticate", 'Basic realm="OpenClaw Dashboard"');
-    return res.status(401).send("Invalid password");
-  }
-  return next();
-}
-
-// --- Gateway token injection ---
-// The gateway is only reachable from this container. The Control UI in the browser
-// cannot set custom Authorization headers for WebSocket connections, so we inject
-// the token into proxied requests at the wrapper level.
-function attachGatewayAuthHeader(req) {
-  if (OPENCLAW_GATEWAY_AUTH_MODE === "token" && !req?.headers?.authorization && OPENCLAW_GATEWAY_TOKEN) {
-    req.headers.authorization = `Bearer ${OPENCLAW_GATEWAY_TOKEN}`;
-  }
-}
-
-proxy.on("proxyReqWs", (_proxyReq, req) => {
-  attachGatewayAuthHeader(req);
-});
-
-app.use(requireDashboardAuth, async (req, res) => {
+app.use(async (req, res) => {
   // If not configured, force users to /setup for any non-setup routes.
   if (!isConfigured() && !req.path.startsWith("/setup")) {
     return res.redirect("/setup");
@@ -1574,7 +1385,6 @@ app.use(requireDashboardAuth, async (req, res) => {
     }
   }
 
-  attachGatewayAuthHeader(req);
   return proxy.web(req, res, { target: GATEWAY_TARGET });
 });
 
@@ -1591,12 +1401,8 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
     fs.chmodSync(STATE_DIR, 0o700);
   } catch {}
 
-  console.log(`[wrapper] gateway token: ${OPENCLAW_GATEWAY_TOKEN ? "(set)" : "(missing)"}`);
   console.log(`[wrapper] gateway auth mode: ${OPENCLAW_GATEWAY_AUTH_MODE}`);
   console.log(`[wrapper] gateway target: ${GATEWAY_TARGET}`);
-  if (SETUP_BASIC_AUTH_ENABLED && !SETUP_PASSWORD) {
-    console.warn("[wrapper] WARNING: SETUP_BASIC_AUTH_ENABLED is set but SETUP_PASSWORD is missing; /setup will error.");
-  }
 
   // Optional operator hook to install/persist extra tools under /data.
   // This is intentionally best-effort and should be used to set up persistent
@@ -1659,7 +1465,6 @@ server.on("upgrade", async (req, socket, head) => {
     socket.destroy();
     return;
   }
-  attachGatewayAuthHeader(req);
   proxy.ws(req, socket, head, { target: GATEWAY_TARGET });
 });
 

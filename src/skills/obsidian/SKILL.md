@@ -11,7 +11,7 @@ The vault is synced continuously to `/data/vaults/` using `ob sync --continuous`
 ## Searching notes
 
 Use the `qmd` skill's query format, scoped to the `obsidian` collection.
-Prefer the structured QMD MCP tools when available. Jarvis on Railway may not
+Prefer the structured QMD MCP tools when available. Jarvis may not
 have shell `exec`; do not guess paths or create new notes just because shell is
 unavailable.
 

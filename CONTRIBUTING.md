@@ -1,29 +1,24 @@
 # Contributing
 
-Thanks for helping improve the OpenClaw Railway Template.
+Jarvis is a portable OpenClaw image. Keep changes aligned with the `/data`
+runtime contract and avoid adding provider-specific behavior to application code.
 
-## Where to ask questions / get help
+Before opening a change, run:
 
-- Discord: https://discord.com/invite/clawd
-- GitHub Issues: https://github.com/vignesh07/clawdbot-railway-template/issues
+```bash
+npm test
+npm run smoke:ssh -- root@example.com
+```
 
-## Reporting bugs
+For Fly-specific changes, also run:
 
-Please include:
+```bash
+npm run smoke:fly
+```
 
-1) **Railway logs** around the failure
-2) The output of:
-   - `GET /healthz`
-   - `GET /setup/api/debug` (after authenticating to `/setup`)
-3) Your Railway settings relevant to networking:
-   - Public Networking enabled?
-   - Domain target port set to **8080**?
+When debugging deployment issues, include:
 
-## Pull requests
-
-- Keep PRs small and focused (one fix per PR)
-- Run locally:
-  - `pnpm lint`
-  - `pnpm test`
-
-If you’re making Dockerfile changes, please explain why they’re needed and how you tested.
+- Host logs around startup
+- `/healthz`
+- `/setup/api/debug`
+- Public hostname and identity-proxy header configuration, without secrets

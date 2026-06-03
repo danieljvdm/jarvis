@@ -5,6 +5,9 @@ set -euo pipefail
 
 log() { echo "[init] $*"; }
 
+INTERNAL_GATEWAY_PORT="${INTERNAL_GATEWAY_PORT:-18789}"
+TAILSCALE_HOSTNAME="${TAILSCALE_HOSTNAME:-jarvis}"
+
 # ── Tailscale ─────────────────────────────────────────────────────────────────
 # Persist Tailscale state to /data so auth survives redeploys.
 # Set TS_AUTHKEY in host secrets (reusable key, tagged tag:server).
@@ -22,7 +25,7 @@ if tailscale status &>/dev/null; then
 else
   if [ -n "${TS_AUTHKEY:-}" ]; then
     log "Authenticating Tailscale with auth key..."
-    tailscale up --authkey="${TS_AUTHKEY}" --hostname=jarvis
+    tailscale up --authkey="${TS_AUTHKEY}" --hostname="${TAILSCALE_HOSTNAME}"
   else
     log "WARNING: Tailscale not authenticated and TS_AUTHKEY not set."
     log "SSH in and run: tailscale up"
@@ -32,8 +35,8 @@ fi
 # Set up tailscale serve to proxy the gateway port over the tailnet.
 # This runs every boot since the serve config doesn't persist (ephemeral filesystem).
 if tailscale status &>/dev/null; then
-  log "Setting up tailscale serve for port 18789..."
-  tailscale serve --bg --yes 18789 || log "WARNING: tailscale serve failed (HTTPS may not be enabled on tailnet)"
+  log "Setting up tailscale serve for port ${INTERNAL_GATEWAY_PORT}..."
+  tailscale serve --bg --yes "${INTERNAL_GATEWAY_PORT}" || log "WARNING: tailscale serve failed (HTTPS may not be enabled on tailnet)"
 fi
 
 # ── openclaw config patches ───────────────────────────────────────────────────
@@ -58,12 +61,10 @@ if [ ! -f "$OPENCLAW_CFG" ] && command -v openclaw >/dev/null 2>&1; then
     --skip-search \
     --workspace "$OPENCLAW_WORKSPACE_DIR" \
     --gateway-bind loopback \
-    --gateway-port 18789 \
-    --gateway-auth token \
-    --gateway-token "${OPENCLAW_GATEWAY_TOKEN:-}" \
+    --gateway-port "${INTERNAL_GATEWAY_PORT}" \
+    --gateway-auth trusted-proxy \
     --flow quickstart \
     --auth-choice skip \
-    --suppress-gateway-token-output \
     || log "WARNING: OpenClaw onboarding failed; /setup can still be used manually."
 fi
 
@@ -91,18 +92,16 @@ if ts.get("mode") != "serve":
     changed = True
     print("[init] set gateway.tailscale.mode = serve")
 ui = gw.setdefault("controlUi", {})
-origins = ui.get("allowedOrigins", [])
-for origin in [
-    "https://jarvis.tail51d7a2.ts.net",
-    "https://openclaw-broken-fire-2366.fly.dev",
-    "https://jarvis.danvdm.com",
-]:
-    if origin not in origins:
-        origins.append(origin)
-        changed = True
-        print(f"[init] added {origin} to controlUi.allowedOrigins")
-if changed:
+public_hosts = [
+    host.strip()
+    for host in os.environ.get("OPENCLAW_PUBLIC_HOSTS", "").split(",")
+    if host.strip()
+]
+origins = [f"https://{host}" for host in public_hosts]
+if ui.get("allowedOrigins") != origins:
     ui["allowedOrigins"] = origins
+    changed = True
+    print("[init] set controlUi.allowedOrigins from OPENCLAW_PUBLIC_HOSTS")
 
 codex_lb_models = [
     {

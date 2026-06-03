@@ -6,7 +6,6 @@ import { spawnSync } from "node:child_process";
 const usage = `Usage:
   node scripts/smoke.js [--local]
   node scripts/smoke.js --fly [--app <name>]
-  node scripts/smoke.js --railway
   node scripts/smoke.js --ssh <host>
 
 Options:
@@ -36,8 +35,6 @@ function parseArgs(argv) {
       opts.mode = "fly";
     } else if (arg === "--app") {
       opts.app = argv[++i];
-    } else if (arg === "--railway") {
-      opts.mode = "railway";
     } else if (arg === "--ssh") {
       opts.mode = "ssh";
       opts.sshHost = argv[++i];
@@ -162,9 +159,6 @@ function run(opts) {
   const script = remoteScript(opts);
   if (opts.mode === "local") {
     return spawnSync("bash", ["-lc", script], { stdio: "inherit" });
-  }
-  if (opts.mode === "railway") {
-    return spawnSync("railway", ["ssh", script], { stdio: "inherit" });
   }
   if (opts.mode === "fly") {
     const args = ["ssh", "console", "-C", `bash -lc ${shellQuote(script)}`];

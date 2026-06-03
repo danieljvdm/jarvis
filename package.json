@@ -1,5 +1,5 @@
 {
-  "name": "clawdbot-railway-template",
+  "name": "jarvis-openclaw",
   "private": true,
   "type": "module",
   "engines": {
@@ -12,7 +12,6 @@
     "test": "node --test",
     "smoke": "node scripts/smoke.js",
     "smoke:fly": "node scripts/smoke.js --fly",
-    "smoke:railway": "node scripts/smoke.js --railway",
     "smoke:ssh": "node scripts/smoke.js --ssh"
   },
   "dependencies": {

@@ -1,245 +1,125 @@
-# OpenClaw Railway Template (1‑click deploy)
+# Jarvis OpenClaw Image
 
-This repo packages **OpenClaw** for Railway with a small **/setup** web wizard so users can deploy and onboard **without running any commands**.
+Jarvis packages OpenClaw, codex-lb, Tailscale, chezmoi-managed dotfiles, and a
+small setup/proxy wrapper into one portable Docker image.
 
-## What you get
+The image is provider-agnostic. Run it anywhere that can keep a persistent
+`/data` volume and route HTTP traffic to the container. The public host should
+sit behind Cloudflare Access, Tailscale, or another trusted identity-aware proxy.
 
-- **OpenClaw Gateway + Control UI** (served at `/` and `/openclaw`)
-- A friendly **Setup Wizard** at `/setup`
-- Persistent state via **Railway Volume** (so config/credentials/memory survive redeploys)
-- One-click **Export backup** (so users can migrate off Railway later)
-- **Import backup** from `/setup` (advanced recovery)
+## What Runs
 
-## How it works (high level)
+- OpenClaw Gateway and Control UI, served through the wrapper at `/` and `/openclaw`
+- Setup/debug UI at `/setup`
+- codex-lb on `127.0.0.1:2455`
+- Tailscale userspace networking and optional Tailscale Serve
+- Optional chezmoi dotfiles sync on boot
+- Optional Obsidian/QMD search support when configured
 
-- The container runs a wrapper web server.
-- The wrapper does not add HTTP Basic auth by default. Put the public host behind
-  Cloudflare Access, Tailscale, or another trusted auth wall.
-- The OpenClaw gateway auth mode defaults to `trusted-proxy` for Cloudflare
-  Access/Tailscale deployments. Set `OPENCLAW_GATEWAY_AUTH_MODE=token` if you
-  need OpenClaw's own token prompt as an extra fallback.
-- Set `SETUP_BASIC_AUTH_ENABLED=1` and/or `DASHBOARD_BASIC_AUTH_ENABLED=1` if you
-  want the legacy extra Basic Auth layers.
-- During setup, the wrapper runs `openclaw onboard --non-interactive ...` inside the container, writes state to the volume, and then starts the gateway.
-- After setup, **`/` is OpenClaw**. The wrapper reverse-proxies all traffic (including WebSockets) to the local gateway process.
+## Runtime Contract
 
-## Railway deploy instructions (what you’ll publish as a Template)
+- Mount persistent storage at `/data`.
+- Set `PORT` if the platform does not route to `8080`.
+- Route external HTTP traffic to the container port.
+- Protect the public host outside the app with Cloudflare Access, Tailscale, or equivalent.
+- Set `OPENCLAW_PUBLIC_HOSTS` to the comma-separated hostnames allowed to reach the wrapper.
 
-In Railway Template Composer:
+Persistent paths:
 
-1) Create a new template from this GitHub repo.
-2) Add a **Volume** mounted at `/data`.
-3) Set the following variables:
+- `/data/.openclaw` - OpenClaw state
+- `/data/workspace` - operator workspace and optional `bootstrap.sh`
+- `/data/.codex-lb` - codex-lb account/session state
+- `/data/.local/share/chezmoi` - dotfiles source
+- `/data/.config` and `/data/.cache` - tool config and cache
 
-Optional auth fallback:
-- `SETUP_BASIC_AUTH_ENABLED=1` — optional legacy extra Basic Auth protection for `/setup`
-- `DASHBOARD_BASIC_AUTH_ENABLED=1` — optional legacy extra Basic Auth protection for the Control UI (`/openclaw`)
-- `SETUP_PASSWORD` — password used by either legacy Basic Auth layer when enabled
+## Required Environment
 
-Recommended:
-- `OPENCLAW_STATE_DIR=/data/.openclaw`
-- `OPENCLAW_WORKSPACE_DIR=/data/workspace`
+```bash
+PORT=8080
+OPENCLAW_STATE_DIR=/data/.openclaw
+OPENCLAW_WORKSPACE_DIR=/data/workspace
+OPENCLAW_PLUGIN_STAGE_DIR=/data/.openclaw/plugin-runtime-deps
+OPENCLAW_PUBLIC_HOSTS=jarvis.example.com,jarvis.tailnet-name.ts.net
+```
 
-Optional:
-- `OPENCLAW_GATEWAY_AUTH_MODE` — `trusted-proxy` by default for Cloudflare Access/Tailscale; set `token` to enable OpenClaw's gateway token layer
-- `OPENCLAW_TRUSTED_PROXY_USER_HEADER` — user identity header for `trusted-proxy` mode; defaults to Cloudflare Access' `cf-access-authenticated-user-email`
-- `OPENCLAW_GATEWAY_TOKEN` — used only when `OPENCLAW_GATEWAY_AUTH_MODE=token`; if not set, the wrapper generates one
+OpenClaw gateway auth is intentionally fixed to `trusted-proxy`. The wrapper
+keeps the gateway bound to loopback, sets `gateway.trustedProxies` to
+`127.0.0.1`, and forwards the identity header configured by
+`OPENCLAW_TRUSTED_PROXY_USER_HEADER`:
 
-Notes:
-- This template pins OpenClaw to a released version by default via Docker build arg `OPENCLAW_GIT_REF` (override if you want `main`).
+```bash
+OPENCLAW_TRUSTED_PROXY_USER_HEADER=cf-access-authenticated-user-email
+```
 
-4) Enable **Public Networking** (HTTP). Railway will assign a domain.
-   - This service listens on Railway’s injected `PORT` at runtime (recommended).
-5) Deploy.
+## Optional Environment
 
-Then:
-- Visit `https://<your-app>.up.railway.app/setup`
-  - If `SETUP_BASIC_AUTH_ENABLED=1`, your browser will prompt for **HTTP Basic auth**. Use any username; the password is `SETUP_PASSWORD`.
-- Complete setup
-- Visit `https://<your-app>.up.railway.app/` and `/openclaw`
+```bash
+TS_AUTHKEY=...
+TAILSCALE_HOSTNAME=jarvis
+CHEZMOI_DOTFILES_REPO=danieljvdm/dotfiles
+CHEZMOI_GITHUB_ACCESS_TOKEN=...
+CODEX_LB_ENABLED=1
+CODEX_LB_DATA_DIR=/data/.codex-lb
+CODEX_LB_HOST=127.0.0.1
+CODEX_LB_PORT=2455
+```
 
-## Support / community
+## First Setup
 
-- GitHub Issues: https://github.com/vignesh07/clawdbot-railway-template/issues
-- Discord: https://discord.com/invite/clawd
+1. Deploy the image with a `/data` volume and external auth wall.
+2. Visit `https://<host>/setup`.
+3. Complete OpenClaw setup and add chat channels such as Telegram.
+4. Visit `https://<host>/openclaw`.
 
-If you’re filing a bug, please include the output of:
-- `/healthz`
-- `/setup/api/debug` (after authenticating to /setup)
+If the config already exists, the wrapper starts OpenClaw automatically at boot
+so polling channels stay alive even when the dashboard is closed.
 
-## Getting chat tokens (so you don’t have to scramble)
+## codex-lb Session Seed
 
-### Codex/OpenCode via codex-lb
-
-When `CHEZMOI_DOTFILES_REPO` is set, Jarvis gets the shared Codex/OpenCode
-config that points at `127.0.0.1:2455`. This image starts `codex-lb` on that
-port after account sessions have been seeded.
-
-Sessions persist at `/data/.codex-lb` on the Railway volume. The container links
-both `~/.codex-lb` and `/var/lib/codex-lb` there so SSH sessions and `codex-lb`
-itself use the same store.
-
-Seed from a Mac that already has working `codex-lb` accounts:
+Seed from a Mac that already has working codex-lb accounts:
 
 ```bash
 sqlite3 ~/.codex-lb/store.db 'PRAGMA wal_checkpoint(TRUNCATE);'
 tar -C ~/.codex-lb -czf /tmp/codex-lb.tgz .
-railway ssh 'mkdir -p /data/.codex-lb && tar -xzf - -C /data/.codex-lb' < /tmp/codex-lb.tgz
+scp /tmp/codex-lb.tgz root@example.com:/tmp/codex-lb.tgz
+ssh root@example.com 'mkdir -p /data/.codex-lb && tar -xzf /tmp/codex-lb.tgz -C /data/.codex-lb'
 ```
 
-Restart/redeploy Jarvis after the copy. Logs go to
+Restart Jarvis after the copy. codex-lb logs go to
 `/data/.local/state/codex-lb.log`.
 
-## Deployment smoke checks
-
-After a deploy, run:
+## Checks
 
 ```bash
-npm run smoke:railway
-```
-
-The smoke checker verifies the OpenClaw version, `/setup/healthz`, codex-lb,
-Codex config, and OpenCode config from inside the running container.
-
-For a portable host with normal SSH access:
-
-```bash
+npm test
+npm run smoke:fly
 npm run smoke:ssh -- root@example.com
 ```
 
-See [docs/PORTABILITY.md](docs/PORTABILITY.md) for the runtime contract needed
-to move Jarvis between Railway, Fly.io, a VPS, or another Docker host.
+The smoke checker validates OpenClaw, wrapper health, codex-lb, Codex config,
+OpenCode config, QMD MCP config, and the reduced OpenClaw tool catalog.
 
-### Telegram bot token
-1) Open Telegram and message **@BotFather**
-2) Run `/newbot` and follow the prompts
-3) BotFather will give you a token that looks like: `123456789:AA...`
-4) Paste that token into `/setup`
-
-### Discord bot token
-1) Go to the Discord Developer Portal: https://discord.com/developers/applications
-2) **New Application** → pick a name
-3) Open the **Bot** tab → **Add Bot**
-4) Copy the **Bot Token** and paste it into `/setup`
-5) Invite the bot to your server (OAuth2 URL Generator → scopes: `bot`, `applications.commands`; then choose permissions)
-
-## Persistence (Railway volume)
-
-Railway containers have an ephemeral filesystem. Only the mounted volume at `/data` persists across restarts/redeploys.
-
-What persists cleanly today:
-- **Custom skills / code:** anything under `OPENCLAW_WORKSPACE_DIR` (default: `/data/workspace`)
-- **Node global tools (npm/pnpm):** this template configures defaults so global installs land under `/data`:
-  - npm globals: `/data/npm` (binaries in `/data/npm/bin`)
-  - pnpm globals: `/data/pnpm` (binaries) + `/data/pnpm-store` (store)
-- **Python packages:** create a venv under `/data` (example below). The runtime image includes Python + venv support.
-
-What does *not* persist cleanly:
-- `apt-get install ...` (installs into `/usr/*`)
-- Homebrew installs (typically `/opt/homebrew` or similar)
-
-### Optional bootstrap hook
-
-If `/data/workspace/bootstrap.sh` exists, the wrapper will run it on startup (best-effort) before starting the gateway.
-Use this to initialize persistent install prefixes or create a venv.
-
-Example `bootstrap.sh`:
+## Local Run
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Example: create a persistent python venv
-python3 -m venv /data/venv || true
-
-# Example: ensure npm/pnpm dirs exist
-mkdir -p /data/npm /data/npm-cache /data/pnpm /data/pnpm-store
-```
-
-## Troubleshooting
-
-### “disconnected (1008): pairing required” / dashboard health offline
-
-This is not a crash — it means the gateway is running, but no device has been approved yet.
-
-Fix:
-- Open `/setup`
-- Use the **Debug Console**:
-  - `openclaw devices list`
-  - `openclaw devices approve <requestId>`
-
-If `openclaw devices list` shows no pending request IDs:
-- Make sure you’re visiting the Control UI at `/openclaw` (or your native app) and letting it attempt to connect
-- Ensure your state dir is the Railway volume (recommended): `OPENCLAW_STATE_DIR=/data/.openclaw`
-- Check `/setup/api/debug` for the active state/workspace dirs + gateway readiness
-
-### “unauthorized: gateway token mismatch”
-
-This only applies when `OPENCLAW_GATEWAY_AUTH_MODE=token`. The Control UI
-connects using `gateway.remote.token` and the gateway validates
-`gateway.auth.token`.
-
-Fix:
-- Re-run `/setup` so the wrapper writes both tokens.
-- Or set both values to the same token in config.
-- Or unset `OPENCLAW_GATEWAY_AUTH_MODE` and protect the host with Cloudflare
-  Access/Tailscale instead; the wrapper will use `trusted-proxy` mode.
-
-### “Application failed to respond” / 502 Bad Gateway
-
-Most often this means the wrapper is up, but the gateway can’t start or can’t bind.
-
-Checklist:
-- Ensure you mounted a **Volume** at `/data` and set:
-  - `OPENCLAW_STATE_DIR=/data/.openclaw`
-  - `OPENCLAW_WORKSPACE_DIR=/data/workspace`
-- Ensure **Public Networking** is enabled (Railway will inject `PORT`).
-- Check Railway logs for the wrapper error: it will show `Gateway not ready:` with the reason.
-
-### Legacy CLAWDBOT_* env vars / multiple state directories
-
-If you see warnings about deprecated `CLAWDBOT_*` variables or state dir split-brain (e.g. `~/.openclaw` vs `/data/...`):
-- Use `OPENCLAW_*` variables only
-- Ensure `OPENCLAW_STATE_DIR=/data/.openclaw` and `OPENCLAW_WORKSPACE_DIR=/data/workspace`
-- Redeploy after fixing Railway Variables
-
-### Build OOM (out of memory) on Railway
-
-Building OpenClaw from source can exceed small memory tiers.
-
-Recommendations:
-- Use a plan with **2GB+ memory**.
-- If you see `Reached heap limit Allocation failed - JavaScript heap out of memory`, upgrade memory and redeploy.
-
-## Local smoke test
-
-```bash
-docker build -t clawdbot-railway-template .
+docker build -t jarvis-openclaw .
 
 docker run --rm -p 8080:8080 \
   -e PORT=8080 \
+  -e OPENCLAW_PUBLIC_HOSTS=localhost \
   -e OPENCLAW_STATE_DIR=/data/.openclaw \
   -e OPENCLAW_WORKSPACE_DIR=/data/workspace \
-  -v $(pwd)/.tmpdata:/data \
-  clawdbot-railway-template
-
-# open http://localhost:8080/setup
+  -v "$(pwd)/.tmpdata:/data" \
+  jarvis-openclaw
 ```
 
----
+Open `http://localhost:8080/setup`.
 
-## Official template / endorsements
+## Backups
 
-- Officially recommended by OpenClaw: <https://docs.openclaw.ai/railway>
-- Railway announcement (official): [Railway tweet announcing 1‑click OpenClaw deploy](https://x.com/railway/status/2015534958925013438)
+The setup UI can export and import a tarball of the configured state/workspace
+under `/data`. For provider moves, copying `/data` to the new persistent volume
+is the deployment boundary.
 
-  ![Railway official tweet screenshot](assets/railway-official-tweet.jpg)
-
-- Endorsement from Railway CEO: [Jake Cooper tweet endorsing the OpenClaw Railway template](https://x.com/justjake/status/2015536083514405182)
-
-  ![Jake Cooper endorsement tweet screenshot](assets/railway-ceo-endorsement.jpg)
-
-- Created and maintained by **Vignesh N (@vignesh07)**
-- **1800+ deploys on Railway and counting** [Link to template on Railway](https://railway.com/deploy/clawdbot-railway-template)
-
-![Railway template deploy count](assets/railway-deploys.jpg)
+See [docs/PORTABILITY.md](docs/PORTABILITY.md) for the host contract and
+[docs/FLY.md](docs/FLY.md) for the current Fly deployment adapter.

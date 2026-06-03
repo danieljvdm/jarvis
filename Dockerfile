@@ -1,9 +1,8 @@
-# Install OpenClaw from the published npm release package. Building the source
-# tree in Railway can hang in tsdown; the npm package ships compiled dist files.
+# Install OpenClaw from the published npm release package. The npm package ships
+# compiled dist files, which keeps image builds predictable across providers.
 FROM node:22-bookworm AS openclaw-package
 WORKDIR /openclaw
 
-# Keep the legacy build arg name because Railway already has it configured.
 ARG OPENCLAW_GIT_REF=v2026.5.27
 RUN set -eux; \
   OPENCLAW_VERSION="${OPENCLAW_GIT_REF#v}"; \
@@ -60,7 +59,7 @@ ENV SHELL=/bin/zsh
 # chezmoi — for dotfiles management
 RUN sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
 
-# uv/uvx — used to run codex-lb in the Railway container.
+# uv/uvx — used to run codex-lb in the container.
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
 # pnpm — used by openclaw update and skill installs

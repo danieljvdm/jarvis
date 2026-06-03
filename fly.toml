@@ -1,8 +1,8 @@
 # Fly.io deployment for Jarvis.
 # Create the app/volume first, then deploy:
-#   fly launch --copy-config --name jarvis-danvdm --no-deploy
-#   fly volumes create jarvis_data --size 20 --region iad
-#   fly secrets set SETUP_PASSWORD=... OPENCLAW_GATEWAY_TOKEN=... TS_AUTHKEY=...
+#   fly launch --copy-config --name openclaw-broken-fire-2366 --no-deploy
+#   fly volumes create jarvis_data --size 20 --region ewr
+#   fly secrets set TS_AUTHKEY=... CHEZMOI_DOTFILES_REPO=... CHEZMOI_GITHUB_ACCESS_TOKEN=...
 #   fly deploy
 
 app = "openclaw-broken-fire-2366"
@@ -20,7 +20,7 @@ kill_timeout = "30s"
   PORT = "8080"
   OPENCLAW_STATE_DIR = "/data/.openclaw"
   OPENCLAW_WORKSPACE_DIR = "/data/workspace"
-  OPENCLAW_PLUGIN_STAGE_DIR = "/data/.clawdbot/plugin-runtime-deps"
+  OPENCLAW_PLUGIN_STAGE_DIR = "/data/.openclaw/plugin-runtime-deps"
   CODEX_LB_ENABLED = "1"
   CODEX_LB_DATA_DIR = "/data/.codex-lb"
   CODEX_LB_HOST = "127.0.0.1"
