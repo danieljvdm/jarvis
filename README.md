@@ -15,6 +15,9 @@ This repo packages **OpenClaw** for Railway with a small **/setup** web wizard s
 - The container runs a wrapper web server.
 - The wrapper does not add HTTP Basic auth by default. Put the public host behind
   Cloudflare Access, Tailscale, or another trusted auth wall.
+- The OpenClaw gateway auth mode defaults to `trusted-proxy` for Cloudflare
+  Access/Tailscale deployments. Set `OPENCLAW_GATEWAY_AUTH_MODE=token` if you
+  need OpenClaw's own token prompt as an extra fallback.
 - Set `SETUP_BASIC_AUTH_ENABLED=1` and/or `DASHBOARD_BASIC_AUTH_ENABLED=1` if you
   want the legacy extra Basic Auth layers.
 - During setup, the wrapper runs `openclaw onboard --non-interactive ...` inside the container, writes state to the volume, and then starts the gateway.
@@ -38,7 +41,9 @@ Recommended:
 - `OPENCLAW_WORKSPACE_DIR=/data/workspace`
 
 Optional:
-- `OPENCLAW_GATEWAY_TOKEN` — if not set, the wrapper generates one (not ideal). In a template, set it using a generated secret.
+- `OPENCLAW_GATEWAY_AUTH_MODE` — `trusted-proxy` by default for Cloudflare Access/Tailscale; set `token` to enable OpenClaw's gateway token layer
+- `OPENCLAW_TRUSTED_PROXY_USER_HEADER` — user identity header for `trusted-proxy` mode; defaults to Cloudflare Access' `cf-access-authenticated-user-email`
+- `OPENCLAW_GATEWAY_TOKEN` — used only when `OPENCLAW_GATEWAY_AUTH_MODE=token`; if not set, the wrapper generates one
 
 Notes:
 - This template pins OpenClaw to a released version by default via Docker build arg `OPENCLAW_GIT_REF` (override if you want `main`).
@@ -165,17 +170,20 @@ Fix:
 
 If `openclaw devices list` shows no pending request IDs:
 - Make sure you’re visiting the Control UI at `/openclaw` (or your native app) and letting it attempt to connect
-  - Note: the Railway wrapper now proxies the gateway and injects the auth token automatically, so you should not need to paste the gateway token into the Control UI when using `/openclaw`.
 - Ensure your state dir is the Railway volume (recommended): `OPENCLAW_STATE_DIR=/data/.openclaw`
 - Check `/setup/api/debug` for the active state/workspace dirs + gateway readiness
 
 ### “unauthorized: gateway token mismatch”
 
-The Control UI connects using `gateway.remote.token` and the gateway validates `gateway.auth.token`.
+This only applies when `OPENCLAW_GATEWAY_AUTH_MODE=token`. The Control UI
+connects using `gateway.remote.token` and the gateway validates
+`gateway.auth.token`.
 
 Fix:
 - Re-run `/setup` so the wrapper writes both tokens.
 - Or set both values to the same token in config.
+- Or unset `OPENCLAW_GATEWAY_AUTH_MODE` and protect the host with Cloudflare
+  Access/Tailscale instead; the wrapper will use `trusted-proxy` mode.
 
 ### “Application failed to respond” / 502 Bad Gateway
 

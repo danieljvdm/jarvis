@@ -25,6 +25,7 @@ kill_timeout = "30s"
   CODEX_LB_DATA_DIR = "/data/.codex-lb"
   CODEX_LB_HOST = "127.0.0.1"
   CODEX_LB_PORT = "2455"
+  OPENCLAW_PUBLIC_HOSTS = "jarvis.danvdm.com,jarvis.tail51d7a2.ts.net"
 
 [[mounts]]
   source = "jarvis_data"

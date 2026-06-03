@@ -49,6 +49,24 @@ const DASHBOARD_BASIC_AUTH_ENABLED = /^(1|true|yes|on)$/i.test(
   process.env.DASHBOARD_BASIC_AUTH_ENABLED ?? "",
 );
 
+function resolveGatewayAuthMode() {
+  const raw = process.env.OPENCLAW_GATEWAY_AUTH_MODE?.trim() || "trusted-proxy";
+  if (["none", "token", "password", "trusted-proxy"].includes(raw)) return raw;
+  console.warn(`[wrapper] WARNING: unsupported OPENCLAW_GATEWAY_AUTH_MODE=${JSON.stringify(raw)}; using "trusted-proxy".`);
+  return "trusted-proxy";
+}
+
+const OPENCLAW_GATEWAY_AUTH_MODE = resolveGatewayAuthMode();
+const OPENCLAW_TRUSTED_PROXY_USER_HEADER =
+  process.env.OPENCLAW_TRUSTED_PROXY_USER_HEADER?.trim() ||
+  "cf-access-authenticated-user-email";
+const GATEWAY_AUTH_SYNC_STAMP = path.join(STATE_DIR, "gateway-auth-sync.json");
+const OPENCLAW_GATEWAY_PASSWORD = process.env.OPENCLAW_GATEWAY_PASSWORD?.trim();
+const OPENCLAW_PUBLIC_HOSTS = (process.env.OPENCLAW_PUBLIC_HOSTS ?? "")
+  .split(",")
+  .map((host) => host.trim().toLowerCase())
+  .filter(Boolean);
+
 // Gateway admin token (protects OpenClaw gateway + Control UI).
 // Must be stable across restarts. If not provided via env, persist it in the state dir.
 function resolveGatewayToken() {
@@ -192,18 +210,27 @@ async function startGateway() {
     "--port",
     String(INTERNAL_GATEWAY_PORT),
     "--auth",
-    "token",
-    "--token",
-    OPENCLAW_GATEWAY_TOKEN,
+    OPENCLAW_GATEWAY_AUTH_MODE,
   ];
+  if (OPENCLAW_GATEWAY_AUTH_MODE === "token") {
+    args.push("--token", OPENCLAW_GATEWAY_TOKEN);
+  }
+  if (OPENCLAW_GATEWAY_AUTH_MODE === "password" && OPENCLAW_GATEWAY_PASSWORD) {
+    args.push("--password", OPENCLAW_GATEWAY_PASSWORD);
+  }
+
+  const gatewayEnv = {
+    ...process.env,
+    OPENCLAW_STATE_DIR: STATE_DIR,
+    OPENCLAW_WORKSPACE_DIR: WORKSPACE_DIR,
+  };
+  if (OPENCLAW_GATEWAY_AUTH_MODE !== "token") {
+    delete gatewayEnv.OPENCLAW_GATEWAY_TOKEN;
+  }
 
   gatewayProc = childProcess.spawn(OPENCLAW_NODE, clawArgs(args), {
     stdio: "inherit",
-    env: {
-      ...process.env,
-      OPENCLAW_STATE_DIR: STATE_DIR,
-      OPENCLAW_WORKSPACE_DIR: WORKSPACE_DIR,
-    },
+    env: gatewayEnv,
   });
 
   gatewayProc.on("error", (err) => {
@@ -308,6 +335,22 @@ app.use(express.json({ limit: "1mb" }));
 
 // Minimal health endpoint for Railway.
 app.get("/setup/healthz", (_req, res) => res.json({ ok: true }));
+
+function normalizeHost(host) {
+  return String(host ?? "").split(",")[0].trim().replace(/:\d+$/, "").toLowerCase();
+}
+
+function requirePublicHost(req, res, next) {
+  if (req.path === "/healthz" || req.path === "/setup/healthz") return next();
+  if (OPENCLAW_PUBLIC_HOSTS.length === 0) return next();
+
+  const host = normalizeHost(req.headers["x-forwarded-host"] || req.headers.host);
+  if (OPENCLAW_PUBLIC_HOSTS.includes(host)) return next();
+
+  return res.status(421).type("text/plain").send("Host not allowed");
+}
+
+app.use(requirePublicHost);
 
 async function probeGateway() {
   // Don't assume HTTP — the gateway primarily speaks WebSocket.
@@ -710,6 +753,146 @@ function runCmd(cmd, args, opts = {}) {
   });
 }
 
+function gatewayAuthSyncSignature() {
+  return {
+    version: 1,
+    mode: OPENCLAW_GATEWAY_AUTH_MODE,
+    trustedProxyUserHeader:
+      OPENCLAW_GATEWAY_AUTH_MODE === "trusted-proxy"
+        ? OPENCLAW_TRUSTED_PROXY_USER_HEADER
+        : null,
+    trustedProxies: ["127.0.0.1"],
+    tokenHash:
+      OPENCLAW_GATEWAY_AUTH_MODE === "token"
+        ? crypto.createHash("sha256").update(OPENCLAW_GATEWAY_TOKEN).digest("hex")
+        : null,
+  };
+}
+
+function readGatewayAuthSyncStamp() {
+  try {
+    return JSON.parse(fs.readFileSync(GATEWAY_AUTH_SYNC_STAMP, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function readOpenClawConfig() {
+  try {
+    return JSON.parse(fs.readFileSync(configPath(), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function hasOwn(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj ?? {}, key);
+}
+
+function stringArrayEquals(a, b) {
+  return Array.isArray(a) && a.length === b.length && a.every((value, idx) => value === b[idx]);
+}
+
+function gatewayAuthConfigLooksCurrent() {
+  const cfg = readOpenClawConfig();
+  const gateway = cfg?.gateway;
+  const auth = gateway?.auth;
+  if (!gateway || !auth) return false;
+  if (auth.mode !== OPENCLAW_GATEWAY_AUTH_MODE) return false;
+  if (!stringArrayEquals(gateway.trustedProxies, ["127.0.0.1"])) return false;
+
+  if (OPENCLAW_GATEWAY_AUTH_MODE === "token") {
+    return auth.token === OPENCLAW_GATEWAY_TOKEN && gateway.remote?.token === OPENCLAW_GATEWAY_TOKEN;
+  }
+
+  if (OPENCLAW_GATEWAY_AUTH_MODE === "trusted-proxy") {
+    const trustedProxy = auth.trustedProxy;
+    return (
+      trustedProxy?.userHeader === OPENCLAW_TRUSTED_PROXY_USER_HEADER &&
+      trustedProxy?.allowLoopback === true &&
+      !hasOwn(auth, "token") &&
+      !hasOwn(auth, "password") &&
+      !hasOwn(gateway.remote, "token") &&
+      !hasOwn(gateway.remote, "password")
+    );
+  }
+
+  return !hasOwn(auth, "token") && !hasOwn(auth, "password");
+}
+
+function currentConfigMtimeMs() {
+  try {
+    return Math.round(fs.statSync(configPath()).mtimeMs);
+  } catch {
+    return null;
+  }
+}
+
+function gatewayAuthSyncIsCurrent(signature) {
+  const stamp = readGatewayAuthSyncStamp();
+  if (!stamp) return false;
+  if (JSON.stringify(stamp.signature) !== JSON.stringify(signature)) return false;
+  const mtimeMs = currentConfigMtimeMs();
+  return mtimeMs === null || stamp.configMtimeMs === mtimeMs;
+}
+
+function writeGatewayAuthSyncStamp(signature) {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.writeFileSync(
+      GATEWAY_AUTH_SYNC_STAMP,
+      JSON.stringify({ signature, configMtimeMs: currentConfigMtimeMs() }, null, 2),
+      { encoding: "utf8", mode: 0o600 },
+    );
+  } catch (err) {
+    console.warn(`[wrapper] failed to write gateway auth sync stamp: ${String(err)}`);
+  }
+}
+
+async function runRequiredConfigCommand(args, opts = {}) {
+  const result = await runCmd(OPENCLAW_NODE, clawArgs(["config", ...args]));
+  if (result.code !== 0 && !opts.optional) {
+    throw new Error(`openclaw config ${args[0] ?? ""} failed with code ${result.code}`);
+  }
+  return result;
+}
+
+async function syncGatewayAuthConfig(opts = {}) {
+  const signature = gatewayAuthSyncSignature();
+  if (!opts.force && gatewayAuthSyncIsCurrent(signature)) {
+    console.log("[wrapper] gateway auth config already synced");
+    return;
+  }
+  if (!opts.force && gatewayAuthConfigLooksCurrent()) {
+    writeGatewayAuthSyncStamp(signature);
+    console.log("[wrapper] gateway auth config already matches");
+    return;
+  }
+
+  await runRequiredConfigCommand(["set", "gateway.auth.mode", OPENCLAW_GATEWAY_AUTH_MODE]);
+  await runRequiredConfigCommand(["set", "--json", "gateway.trustedProxies", JSON.stringify(["127.0.0.1"])]);
+
+  if (OPENCLAW_GATEWAY_AUTH_MODE === "token") {
+    await runRequiredConfigCommand(["set", "gateway.auth.token", OPENCLAW_GATEWAY_TOKEN]);
+    await runRequiredConfigCommand(["set", "gateway.remote.token", OPENCLAW_GATEWAY_TOKEN]);
+    writeGatewayAuthSyncStamp(signature);
+    return;
+  }
+
+  if (OPENCLAW_GATEWAY_AUTH_MODE === "trusted-proxy") {
+    await runRequiredConfigCommand(["set", "gateway.auth.trustedProxy.userHeader", OPENCLAW_TRUSTED_PROXY_USER_HEADER]);
+    await runRequiredConfigCommand(["set", "--json", "gateway.auth.trustedProxy.allowLoopback", "true"]);
+  }
+
+  // Prevent stale Control UI credentials from being reused when the public host
+  // is protected by Cloudflare Access or another identity-aware proxy instead.
+  await runRequiredConfigCommand(["unset", "gateway.auth.token"], { optional: true });
+  await runRequiredConfigCommand(["unset", "gateway.auth.password"], { optional: true });
+  await runRequiredConfigCommand(["unset", "gateway.remote.token"], { optional: true });
+  await runRequiredConfigCommand(["unset", "gateway.remote.password"], { optional: true });
+  writeGatewayAuthSyncStamp(signature);
+}
+
 app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
   try {
     const respondJson = (status, body) => {
@@ -745,13 +928,8 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
 
   // Optional setup (only after successful onboarding).
   if (ok) {
-    // Ensure gateway token is written into config so the browser UI can authenticate reliably.
-    // (We also enforce loopback bind since the wrapper proxies externally.)
-    // IMPORTANT: Set both gateway.auth.token (server-side) and gateway.remote.token (client-side)
-    // to the same value so the Control UI can connect without "token mismatch" errors.
-    await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.auth.mode", "token"]));
-    await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.auth.token", OPENCLAW_GATEWAY_TOKEN]));
-    await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.remote.token", OPENCLAW_GATEWAY_TOKEN]));
+    // Ensure the gateway auth mode matches the wrapper/front-door security model.
+    await syncGatewayAuthConfig();
     await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.bind", "loopback"]));
     await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.port", String(INTERNAL_GATEWAY_PORT)]));
 
@@ -1365,7 +1543,7 @@ function requireDashboardAuth(req, res, next) {
 // cannot set custom Authorization headers for WebSocket connections, so we inject
 // the token into proxied requests at the wrapper level.
 function attachGatewayAuthHeader(req) {
-  if (!req?.headers?.authorization && OPENCLAW_GATEWAY_TOKEN) {
+  if (OPENCLAW_GATEWAY_AUTH_MODE === "token" && !req?.headers?.authorization && OPENCLAW_GATEWAY_TOKEN) {
     req.headers.authorization = `Bearer ${OPENCLAW_GATEWAY_TOKEN}`;
   }
 }
@@ -1414,6 +1592,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
   } catch {}
 
   console.log(`[wrapper] gateway token: ${OPENCLAW_GATEWAY_TOKEN ? "(set)" : "(missing)"}`);
+  console.log(`[wrapper] gateway auth mode: ${OPENCLAW_GATEWAY_AUTH_MODE}`);
   console.log(`[wrapper] gateway target: ${GATEWAY_TARGET}`);
   if (SETUP_BASIC_AUTH_ENABLED && !SETUP_PASSWORD) {
     console.warn("[wrapper] WARNING: SETUP_BASIC_AUTH_ENABLED is set but SETUP_PASSWORD is missing; /setup will error.");
@@ -1440,18 +1619,15 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
     }
   }
 
-  // Sync gateway tokens in config with the current env var on every startup.
-  // This prevents "gateway token mismatch" when OPENCLAW_GATEWAY_TOKEN changes
-  // (e.g. Railway variable update) but the config file still has the old value.
-  if (isConfigured() && OPENCLAW_GATEWAY_TOKEN) {
-    console.log("[wrapper] syncing gateway tokens in config...");
+  // Sync gateway auth in config with the wrapper/front-door security model.
+  // Default is "trusted-proxy" for deployments protected by Cloudflare Access/Tailscale.
+  if (isConfigured()) {
+    console.log("[wrapper] syncing gateway auth config...");
     try {
-      await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.auth.mode", "token"]));
-      await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.auth.token", OPENCLAW_GATEWAY_TOKEN]));
-      await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "gateway.remote.token", OPENCLAW_GATEWAY_TOKEN]));
-      console.log("[wrapper] gateway tokens synced");
+      await syncGatewayAuthConfig();
+      console.log("[wrapper] gateway auth config synced");
     } catch (err) {
-      console.warn(`[wrapper] failed to sync gateway tokens: ${String(err)}`);
+      console.warn(`[wrapper] failed to sync gateway auth config: ${String(err)}`);
     }
   }
 
@@ -1471,7 +1647,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
 server.on("upgrade", async (req, socket, head) => {
   // Note: browsers cannot attach arbitrary HTTP headers (including Authorization: Basic)
   // in WebSocket handshakes. Do not enforce dashboard Basic auth at the upgrade layer.
-  // The gateway authenticates at the protocol layer and we inject the gateway token below.
+  // If token mode is enabled, we inject the gateway token below.
 
   if (!isConfigured()) {
     socket.destroy();

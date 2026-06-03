@@ -37,7 +37,7 @@ if tailscale status &>/dev/null; then
 fi
 
 # ── openclaw config patches ───────────────────────────────────────────────────
-# - gateway.trustedProxies = ["loopback"] for reverse proxies
+# - gateway.trustedProxies = ["127.0.0.1"] for the local wrapper reverse proxy
 # - gateway.tailscale.mode = "serve" for tailnet-only dashboard access
 # - codex-lb providers for OpenClaw model traffic
 OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-/data/.openclaw}"
@@ -81,10 +81,10 @@ if gw.get("bind") != "loopback":
     gw["bind"] = "loopback"
     changed = True
     print("[init] set gateway.bind = loopback")
-if gw.get("trustedProxies") != ["loopback"]:
-    gw["trustedProxies"] = ["loopback"]
+if gw.get("trustedProxies") != ["127.0.0.1"]:
+    gw["trustedProxies"] = ["127.0.0.1"]
     changed = True
-    print("[init] set gateway.trustedProxies = [loopback]")
+    print("[init] set gateway.trustedProxies = [127.0.0.1]")
 ts = gw.setdefault("tailscale", {})
 if ts.get("mode") != "serve":
     ts["mode"] = "serve"
@@ -95,6 +95,7 @@ origins = ui.get("allowedOrigins", [])
 for origin in [
     "https://jarvis.tail51d7a2.ts.net",
     "https://openclaw-broken-fire-2366.fly.dev",
+    "https://jarvis.danvdm.com",
 ]:
     if origin not in origins:
         origins.append(origin)
