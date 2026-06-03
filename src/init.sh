@@ -91,13 +91,17 @@ if ts.get("mode") != "serve":
     changed = True
     print("[init] set gateway.tailscale.mode = serve")
 ui = gw.setdefault("controlUi", {})
-ts_origin = "https://jarvis.tail51d7a2.ts.net"
 origins = ui.get("allowedOrigins", [])
-if ts_origin not in origins:
-    origins.append(ts_origin)
+for origin in [
+    "https://jarvis.tail51d7a2.ts.net",
+    "https://openclaw-broken-fire-2366.fly.dev",
+]:
+    if origin not in origins:
+        origins.append(origin)
+        changed = True
+        print(f"[init] added {origin} to controlUi.allowedOrigins")
+if changed:
     ui["allowedOrigins"] = origins
-    changed = True
-    print(f"[init] added {ts_origin} to controlUi.allowedOrigins")
 
 codex_lb_models = [
     {
