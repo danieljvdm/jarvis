@@ -14,7 +14,9 @@ sit behind Cloudflare Access, Tailscale, or another trusted identity-aware proxy
 - codex-lb on `127.0.0.1:2455`
 - Tailscale userspace networking and optional Tailscale Serve
 - Optional chezmoi dotfiles sync on boot
-- Optional Obsidian/QMD search support when configured
+- Obsidian/QMD search support when configured
+- Web research through OpenClaw web search/fetch, Brave/DuckDuckGo providers,
+  readability extraction, PDF extraction, and browser interaction tools
 
 ## Runtime Contract
 
@@ -62,6 +64,8 @@ CODEX_LB_ENABLED=1
 CODEX_LB_DATA_DIR=/data/.codex-lb
 CODEX_LB_HOST=127.0.0.1
 CODEX_LB_PORT=2455
+BRAVE_SEARCH_API_KEY=...
+OPENCLAW_BOOTSTRAP_PLUGINS=@openclaw/brave-plugin
 ```
 
 ## First Setup
@@ -97,7 +101,8 @@ npm run smoke:ssh -- root@example.com
 ```
 
 The smoke checker validates OpenClaw, wrapper health, codex-lb, Codex config,
-OpenCode config, QMD MCP config, and the reduced OpenClaw tool catalog.
+OpenCode config, QMD MCP config, and Jarvis's curated research/browser tool
+catalog.
 
 ## Local Run
 

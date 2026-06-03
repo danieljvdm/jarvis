@@ -205,8 +205,8 @@ if servers.get("qmd") != qmd_server:
 
 # codex-lb currently accepts small OpenClaw tool payloads, but returns upstream
 # internal errors when OpenClaw exposes the full coding catalog, especially exec.
-# Keep Jarvis on a small no-shell surface that still supports file, memory, and
-# qmd-backed Obsidian search.
+# Keep Jarvis on a curated no-shell surface that supports file edits, memory,
+# Obsidian/QMD search, web research, PDF extraction, and browser interaction.
 tools = cfg.setdefault("tools", {})
 if tools.get("profile") != "minimal":
     tools["profile"] = "minimal"
@@ -226,14 +226,17 @@ safe_tools = [
     "qmd__get",
     "qmd__multi_get",
     "qmd__status",
+    "web_search",
+    "web_fetch",
+    "browser",
+    "pdf",
 ]
 if tools.get("alsoAllow") != safe_tools:
     tools["alsoAllow"] = safe_tools
     changed = True
-    print("[init] set tools.alsoAllow for codex-lb-safe Obsidian catalog")
+    print("[init] set tools.alsoAllow for Jarvis research/browser catalog")
 deny_tools = [
     "agents_list",
-    "browser",
     "canvas",
     "cron",
     "dir_fetch",
@@ -246,7 +249,6 @@ deny_tools = [
     "image_generate",
     "message",
     "nodes",
-    "pdf",
     "process",
     "sessions_history",
     "sessions_list",
@@ -255,13 +257,50 @@ deny_tools = [
     "sessions_yield",
     "subagents",
     "tts",
-    "web_fetch",
-    "web_search",
 ]
 if tools.get("deny") != deny_tools:
     tools["deny"] = deny_tools
     changed = True
-    print("[init] set tools.deny for codex-lb-safe catalog")
+    print("[init] set tools.deny for Jarvis research/browser catalog")
+web = tools.setdefault("web", {})
+search = web.setdefault("search", {})
+plugins = cfg.setdefault("plugins", {})
+entries = plugins.setdefault("entries", {})
+
+def ensure_plugin_enabled(plugin_id):
+    entry = entries.setdefault(plugin_id, {})
+    if entry.get("enabled") is not True:
+        entry["enabled"] = True
+        print(f"[init] enabled plugin {plugin_id}")
+        return True
+    return False
+
+for plugin_id in ("browser", "duckduckgo", "web-readability"):
+    if ensure_plugin_enabled(plugin_id):
+        changed = True
+
+brave_entry = entries.setdefault("brave", {})
+brave_env_key = os.environ.get("BRAVE_SEARCH_API_KEY", "").strip()
+brave_config = brave_entry.setdefault("config", {})
+brave_web_search = brave_config.setdefault("webSearch", {})
+if brave_env_key and brave_web_search.get("apiKey") != brave_env_key:
+    brave_web_search["apiKey"] = brave_env_key
+    changed = True
+    print("[init] set Brave search API key from BRAVE_SEARCH_API_KEY")
+brave_has_key = bool(str(brave_web_search.get("apiKey", "")).strip())
+if brave_has_key:
+    if brave_entry.get("enabled") is not True:
+        brave_entry["enabled"] = True
+        changed = True
+        print("[init] enabled plugin brave")
+    if search.get("provider") != "brave":
+        search["provider"] = "brave"
+        changed = True
+        print("[init] set tools.web.search.provider = brave")
+elif search.get("provider") != "duckduckgo":
+    search["provider"] = "duckduckgo"
+    changed = True
+    print("[init] set tools.web.search.provider = duckduckgo")
 if tools.get("toolSearch") is not False:
     tools["toolSearch"] = False
     changed = True
@@ -271,6 +310,28 @@ if changed:
         json.dump(cfg, f, indent=2)
         f.write("\n")
 PYEOF
+fi
+
+# Install external OpenClaw plugins into /data so the image stays portable while
+# still gaining provider-specific tools when a persisted config expects them.
+OPENCLAW_BOOTSTRAP_PLUGINS="${OPENCLAW_BOOTSTRAP_PLUGINS:-@openclaw/brave-plugin}"
+PLUGIN_STAMP_DIR="${OPENCLAW_STATE_DIR}/plugin-installs"
+if [ -n "$OPENCLAW_BOOTSTRAP_PLUGINS" ] && command -v openclaw >/dev/null 2>&1; then
+  mkdir -p "$PLUGIN_STAMP_DIR"
+  for plugin_spec in $OPENCLAW_BOOTSTRAP_PLUGINS; do
+    plugin_stamp="$(printf '%s' "$plugin_spec" | tr -c 'A-Za-z0-9_.@-' '_')"
+    plugin_stamp_path="${PLUGIN_STAMP_DIR}/${plugin_stamp}.stamp"
+    if [ -f "$plugin_stamp_path" ]; then
+      log "OpenClaw plugin already bootstrapped: ${plugin_spec}"
+      continue
+    fi
+    log "Installing OpenClaw plugin: ${plugin_spec}"
+    if openclaw plugins install "$plugin_spec" --force; then
+      date -u +"%Y-%m-%dT%H:%M:%SZ" > "$plugin_stamp_path"
+    else
+      log "WARNING: failed to install OpenClaw plugin ${plugin_spec}; continuing"
+    fi
+  done
 fi
 
 # ── chezmoi dotfiles ──────────────────────────────────────────────────────────

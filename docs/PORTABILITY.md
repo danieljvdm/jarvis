@@ -53,7 +53,13 @@ CODEX_LB_ENABLED=1
 CODEX_LB_DATA_DIR=/data/.codex-lb
 CODEX_LB_HOST=127.0.0.1
 CODEX_LB_PORT=2455
+BRAVE_SEARCH_API_KEY=...
+OPENCLAW_BOOTSTRAP_PLUGINS=@openclaw/brave-plugin
 ```
+
+Jarvis enables a curated no-shell research/browser catalog by default:
+OpenClaw web search/fetch, browser interaction, PDF extraction, memory, file
+edit tools, and QMD/Obsidian search. Shell/process tools remain denied.
 
 ## Health Checks
 
