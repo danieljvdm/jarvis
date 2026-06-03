@@ -45,6 +45,12 @@ deploy, run the smoke checker from this repo:
 npm run smoke:railway
 ```
 
+For Fly.io:
+
+```bash
+npm run smoke:fly
+```
+
 For a non-Railway host with SSH access:
 
 ```bash
@@ -64,3 +70,6 @@ The smoke checker verifies:
 To move Jarvis, copy the contents of `/data` to the new host's persistent volume,
 set equivalent environment variables, deploy the same image, then run the smoke
 checker against the new host.
+
+See [Fly.io Deployment](./FLY.md) for the Fly-specific app, volume, SSH, and
+data migration commands.

@@ -5,10 +5,12 @@ import { spawnSync } from "node:child_process";
 
 const usage = `Usage:
   node scripts/smoke.js [--local]
+  node scripts/smoke.js --fly [--app <name>]
   node scripts/smoke.js --railway
   node scripts/smoke.js --ssh <host>
 
 Options:
+  --app <name>                  Fly app name for --fly mode.
   --expected-version <version>  Require OpenClaw version, default from Dockerfile ARG.
   --health-url <url>           Wrapper health URL, default http://127.0.0.1:\${PORT:-8080}/setup/healthz.
   --codex-lb-url <url>         codex-lb models URL, default http://127.0.0.1:2455/v1/models.
@@ -30,6 +32,10 @@ function parseArgs(argv) {
       opts.help = true;
     } else if (arg === "--local") {
       opts.mode = "local";
+    } else if (arg === "--fly") {
+      opts.mode = "fly";
+    } else if (arg === "--app") {
+      opts.app = argv[++i];
     } else if (arg === "--railway") {
       opts.mode = "railway";
     } else if (arg === "--ssh") {
@@ -159,6 +165,11 @@ function run(opts) {
   }
   if (opts.mode === "railway") {
     return spawnSync("railway", ["ssh", script], { stdio: "inherit" });
+  }
+  if (opts.mode === "fly") {
+    const args = ["ssh", "console", "-C", script];
+    if (opts.app) args.push("--app", opts.app);
+    return spawnSync("fly", args, { stdio: "inherit" });
   }
   if (opts.mode === "ssh") {
     return spawnSync("ssh", [opts.sshHost, script], { stdio: "inherit" });
