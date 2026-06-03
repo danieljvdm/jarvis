@@ -42,6 +42,12 @@ const WORKSPACE_DIR =
 
 // Protect /setup with a user-provided password.
 const SETUP_PASSWORD = process.env.SETUP_PASSWORD?.trim();
+const SETUP_BASIC_AUTH_ENABLED = /^(1|true|yes|on)$/i.test(
+  process.env.SETUP_BASIC_AUTH_ENABLED ?? "",
+);
+const DASHBOARD_BASIC_AUTH_ENABLED = /^(1|true|yes|on)$/i.test(
+  process.env.DASHBOARD_BASIC_AUTH_ENABLED ?? "",
+);
 
 // Gateway admin token (protects OpenClaw gateway + Control UI).
 // Must be stable across restarts. If not provided via env, persist it in the state dir.
@@ -272,11 +278,12 @@ async function restartGateway() {
 }
 
 function requireSetupAuth(req, res, next) {
+  if (!SETUP_BASIC_AUTH_ENABLED) return next();
   if (!SETUP_PASSWORD) {
     return res
       .status(500)
       .type("text/plain")
-      .send("SETUP_PASSWORD is not set. Set it in Railway Variables before using /setup.");
+      .send("SETUP_PASSWORD is not set. Set it before enabling SETUP_BASIC_AUTH_ENABLED.");
   }
 
   const header = req.headers.authorization || "";
@@ -1329,9 +1336,11 @@ proxy.on("error", (err, _req, res) => {
 });
 
 // --- Dashboard password protection ---
-// Require the same SETUP_PASSWORD for the entire Control UI dashboard,
-// not just the /setup routes.  Healthcheck is excluded so Railway probes work.
+// Optional extra password protection for the Control UI dashboard. This is off by
+// default because the gateway already has token + device pairing, and deployments
+// can put the whole public host behind Cloudflare Access or a similar SSO wall.
 function requireDashboardAuth(req, res, next) {
+  if (!DASHBOARD_BASIC_AUTH_ENABLED) return next();
   if (req.path === "/healthz" || req.path === "/setup/healthz") return next();
   if (req.path.startsWith("/hooks")) return next(); // allow OpenClaw webhook endpoints to bypass dashboard auth
   if (!SETUP_PASSWORD) return next(); // no password configured → open
@@ -1406,8 +1415,8 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
 
   console.log(`[wrapper] gateway token: ${OPENCLAW_GATEWAY_TOKEN ? "(set)" : "(missing)"}`);
   console.log(`[wrapper] gateway target: ${GATEWAY_TARGET}`);
-  if (!SETUP_PASSWORD) {
-    console.warn("[wrapper] WARNING: SETUP_PASSWORD is not set; /setup will error.");
+  if (SETUP_BASIC_AUTH_ENABLED && !SETUP_PASSWORD) {
+    console.warn("[wrapper] WARNING: SETUP_BASIC_AUTH_ENABLED is set but SETUP_PASSWORD is missing; /setup will error.");
   }
 
   // Optional operator hook to install/persist extra tools under /data.

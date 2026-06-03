@@ -5,7 +5,7 @@ This repo packages **OpenClaw** for Railway with a small **/setup** web wizard s
 ## What you get
 
 - **OpenClaw Gateway + Control UI** (served at `/` and `/openclaw`)
-- A friendly **Setup Wizard** at `/setup` (protected by a password)
+- A friendly **Setup Wizard** at `/setup`
 - Persistent state via **Railway Volume** (so config/credentials/memory survive redeploys)
 - One-click **Export backup** (so users can migrate off Railway later)
 - **Import backup** from `/setup` (advanced recovery)
@@ -13,7 +13,10 @@ This repo packages **OpenClaw** for Railway with a small **/setup** web wizard s
 ## How it works (high level)
 
 - The container runs a wrapper web server.
-- The wrapper protects `/setup` (and the Control UI at `/openclaw`) with `SETUP_PASSWORD` using HTTP Basic auth.
+- The wrapper does not add HTTP Basic auth by default. Put the public host behind
+  Cloudflare Access, Tailscale, or another trusted auth wall.
+- Set `SETUP_BASIC_AUTH_ENABLED=1` and/or `DASHBOARD_BASIC_AUTH_ENABLED=1` if you
+  want the legacy extra Basic Auth layers.
 - During setup, the wrapper runs `openclaw onboard --non-interactive ...` inside the container, writes state to the volume, and then starts the gateway.
 - After setup, **`/` is OpenClaw**. The wrapper reverse-proxies all traffic (including WebSockets) to the local gateway process.
 
@@ -25,8 +28,10 @@ In Railway Template Composer:
 2) Add a **Volume** mounted at `/data`.
 3) Set the following variables:
 
-Required:
-- `SETUP_PASSWORD` — user-provided password to access `/setup` and the Control UI (`/openclaw`) via HTTP Basic auth
+Optional auth fallback:
+- `SETUP_BASIC_AUTH_ENABLED=1` — optional legacy extra Basic Auth protection for `/setup`
+- `DASHBOARD_BASIC_AUTH_ENABLED=1` — optional legacy extra Basic Auth protection for the Control UI (`/openclaw`)
+- `SETUP_PASSWORD` — password used by either legacy Basic Auth layer when enabled
 
 Recommended:
 - `OPENCLAW_STATE_DIR=/data/.openclaw`
@@ -44,9 +49,9 @@ Notes:
 
 Then:
 - Visit `https://<your-app>.up.railway.app/setup`
-  - Your browser will prompt for **HTTP Basic auth**. Use any username; the password is `SETUP_PASSWORD`.
+  - If `SETUP_BASIC_AUTH_ENABLED=1`, your browser will prompt for **HTTP Basic auth**. Use any username; the password is `SETUP_PASSWORD`.
 - Complete setup
-- Visit `https://<your-app>.up.railway.app/` and `/openclaw` (same Basic auth)
+- Visit `https://<your-app>.up.railway.app/` and `/openclaw`
 
 ## Support / community
 
@@ -205,13 +210,12 @@ docker build -t clawdbot-railway-template .
 
 docker run --rm -p 8080:8080 \
   -e PORT=8080 \
-  -e SETUP_PASSWORD=test \
   -e OPENCLAW_STATE_DIR=/data/.openclaw \
   -e OPENCLAW_WORKSPACE_DIR=/data/workspace \
   -v $(pwd)/.tmpdata:/data \
   clawdbot-railway-template
 
-# open http://localhost:8080/setup (password: test)
+# open http://localhost:8080/setup
 ```
 
 ---
