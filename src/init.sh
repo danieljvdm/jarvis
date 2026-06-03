@@ -182,9 +182,28 @@ if agent_models.get("codex-lb/gpt-5.4-mini") != {}:
     changed = True
     print("[init] added agents.defaults.models.codex-lb/gpt-5.4-mini")
 
+# Expose QMD through MCP so Jarvis can search the Obsidian vault without shell
+# access. The qmd CLI is installed later in this boot script; MCP starts it lazily.
+mcp = cfg.setdefault("mcp", {})
+servers = mcp.setdefault("servers", {})
+qmd_server = {
+    "command": "qmd",
+    "args": ["mcp"],
+    "env": {
+        "HOME": "/data",
+        "XDG_CACHE_HOME": "/data/.cache",
+        "XDG_CONFIG_HOME": "/data/.config",
+    },
+}
+if servers.get("qmd") != qmd_server:
+    servers["qmd"] = qmd_server
+    changed = True
+    print("[init] set mcp.servers.qmd")
+
 # codex-lb currently accepts small OpenClaw tool payloads, but returns upstream
 # internal errors when OpenClaw exposes the full coding catalog, especially exec.
-# Keep Jarvis on a small no-shell surface that still supports file and memory work.
+# Keep Jarvis on a small no-shell surface that still supports file, memory, and
+# qmd-backed Obsidian search.
 tools = cfg.setdefault("tools", {})
 if tools.get("profile") != "minimal":
     tools["profile"] = "minimal"
@@ -194,11 +213,21 @@ if "allow" in tools:
     del tools["allow"]
     changed = True
     print("[init] removed tools.allow")
-safe_tools = ["read", "write", "edit", "memory_search", "memory_get"]
+safe_tools = [
+    "read",
+    "write",
+    "edit",
+    "memory_search",
+    "memory_get",
+    "qmd__query",
+    "qmd__get",
+    "qmd__multi_get",
+    "qmd__status",
+]
 if tools.get("alsoAllow") != safe_tools:
     tools["alsoAllow"] = safe_tools
     changed = True
-    print("[init] set tools.alsoAllow = read,write,edit,memory_search,memory_get")
+    print("[init] set tools.alsoAllow for codex-lb-safe Obsidian catalog")
 deny_tools = [
     "agents_list",
     "browser",
