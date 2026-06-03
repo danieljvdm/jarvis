@@ -3,7 +3,7 @@
 FROM node:22-bookworm AS openclaw-package
 WORKDIR /openclaw
 
-ARG OPENCLAW_GIT_REF=v2026.5.27
+ARG OPENCLAW_GIT_REF=v2026.5.28
 RUN set -eux; \
   OPENCLAW_VERSION="${OPENCLAW_GIT_REF#v}"; \
   npm pack "openclaw@${OPENCLAW_VERSION}" --pack-destination /tmp; \
