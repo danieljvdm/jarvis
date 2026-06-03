@@ -15,8 +15,9 @@ sit behind Cloudflare Access, Tailscale, or another trusted identity-aware proxy
 - Tailscale userspace networking and optional Tailscale Serve
 - Optional chezmoi dotfiles sync on boot
 - Obsidian/QMD search support when configured
-- Web research through OpenClaw web search/fetch, Brave/DuckDuckGo providers,
-  readability extraction, PDF extraction, and browser interaction tools
+- Web research through OpenClaw web search/fetch, Brave/DuckDuckGo/Exa/Tavily/
+  Perplexity/Firecrawl/SearXNG providers, readability extraction, PDF
+  extraction, and browser interaction tools
 
 ## Runtime Contract
 
@@ -65,8 +66,29 @@ CODEX_LB_DATA_DIR=/data/.codex-lb
 CODEX_LB_HOST=127.0.0.1
 CODEX_LB_PORT=2455
 BRAVE_SEARCH_API_KEY=...
+OPENCLAW_WEB_SEARCH_PROVIDER=brave
+EXA_API_KEY=...
+EXA_BASE_URL=...
+FIRECRAWL_API_KEY=...
+FIRECRAWL_BASE_URL=...
+TAVILY_API_KEY=...
+TAVILY_BASE_URL=...
+PERPLEXITY_API_KEY=...
+PERPLEXITY_BASE_URL=...
+PERPLEXITY_MODEL=...
+OPENROUTER_API_KEY=...
+SEARXNG_BASE_URL=...
+SEARXNG_CATEGORIES=general,news
+SEARXNG_LANGUAGE=en
 OPENCLAW_BOOTSTRAP_PLUGINS=@openclaw/brave-plugin
 ```
+
+Search provider selection defaults to the best configured provider in this
+order: Brave, Exa, Tavily, Perplexity, Firecrawl, SearXNG, then DuckDuckGo.
+Set `OPENCLAW_WEB_SEARCH_PROVIDER` to pick a specific configured provider.
+When `FIRECRAWL_API_KEY` is present, Jarvis also uses Firecrawl as the
+`web_fetch` fallback and exposes Firecrawl/Tavily direct tools through the
+curated no-shell tool catalog.
 
 ## First Setup
 

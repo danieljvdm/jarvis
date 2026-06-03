@@ -230,6 +230,10 @@ safe_tools = [
     "web_fetch",
     "browser",
     "pdf",
+    "firecrawl_search",
+    "firecrawl_scrape",
+    "tavily_search",
+    "tavily_extract",
 ]
 if tools.get("alsoAllow") != safe_tools:
     tools["alsoAllow"] = safe_tools
@@ -264,7 +268,107 @@ if tools.get("deny") != deny_tools:
     print("[init] set tools.deny for Jarvis research/browser catalog")
 web = tools.setdefault("web", {})
 search = web.setdefault("search", {})
+fetch = web.setdefault("fetch", {})
 plugins = cfg.setdefault("plugins", {})
+trusted_plugin_ids = [
+    "active-memory",
+    "admin-http-rpc",
+    "alibaba",
+    "anthropic",
+    "arcee",
+    "azure-speech",
+    "bonjour",
+    "brave",
+    "browser",
+    "byteplus",
+    "canvas",
+    "cerebras",
+    "chutes",
+    "clickclack",
+    "cloudflare-ai-gateway",
+    "codex-supervisor",
+    "comfy",
+    "copilot-proxy",
+    "deepgram",
+    "deepinfra",
+    "deepseek",
+    "device-pair",
+    "document-extract",
+    "duckduckgo",
+    "elevenlabs",
+    "exa",
+    "fal",
+    "file-transfer",
+    "firecrawl",
+    "fireworks",
+    "github-copilot",
+    "google",
+    "gradium",
+    "groq",
+    "huggingface",
+    "imessage",
+    "inworld",
+    "irc",
+    "kilocode",
+    "kimi",
+    "litellm",
+    "llm-task",
+    "lmstudio",
+    "mattermost",
+    "memory-core",
+    "memory-wiki",
+    "microsoft",
+    "microsoft-foundry",
+    "migrate-claude",
+    "migrate-hermes",
+    "minimax",
+    "mistral",
+    "moonshot",
+    "nvidia",
+    "oc-path",
+    "ollama",
+    "open-prose",
+    "openai",
+    "opencode",
+    "opencode-go",
+    "openrouter",
+    "perplexity",
+    "phone-control",
+    "policy",
+    "qianfan",
+    "qwen",
+    "runway",
+    "searxng",
+    "senseaudio",
+    "sglang",
+    "signal",
+    "skill-workshop",
+    "stepfun",
+    "synthetic",
+    "talk-voice",
+    "tavily",
+    "telegram",
+    "tencent",
+    "thread-ownership",
+    "together",
+    "tts-local-cli",
+    "venice",
+    "vercel-ai-gateway",
+    "vllm",
+    "volcengine",
+    "voyage",
+    "vydra",
+    "web-readability",
+    "webhooks",
+    "workboard",
+    "xai",
+    "xiaomi",
+    "zai",
+]
+if plugins.get("allow") != trusted_plugin_ids:
+    plugins["allow"] = trusted_plugin_ids
+    changed = True
+    print("[init] set plugins.allow to trusted OpenClaw plugin ids")
 entries = plugins.setdefault("entries", {})
 
 def ensure_plugin_enabled(plugin_id):
@@ -275,32 +379,121 @@ def ensure_plugin_enabled(plugin_id):
         return True
     return False
 
-for plugin_id in ("browser", "duckduckgo", "web-readability"):
+def env_value(name):
+    return os.environ.get(name, "").strip()
+
+def entry_config(plugin_id):
+    return entries.setdefault(plugin_id, {}).setdefault("config", {})
+
+def set_plugin_config(plugin_id, section_name, key, value, label):
+    if not value:
+        return False
+    section = entry_config(plugin_id).setdefault(section_name, {})
+    if section.get(key) == value:
+        return False
+    section[key] = value
+    print(f"[init] set {label} from environment")
+    return True
+
+def has_plugin_config_value(plugin_id, section_name, key):
+    section = entry_config(plugin_id).setdefault(section_name, {})
+    value = section.get(key)
+    if isinstance(value, str):
+        return bool(value.strip())
+    return value is not None
+
+for plugin_id in ("browser", "document-extract", "duckduckgo", "web-readability"):
     if ensure_plugin_enabled(plugin_id):
         changed = True
 
-brave_entry = entries.setdefault("brave", {})
 brave_env_key = os.environ.get("BRAVE_SEARCH_API_KEY", "").strip()
-brave_config = brave_entry.setdefault("config", {})
-brave_web_search = brave_config.setdefault("webSearch", {})
-if brave_env_key and brave_web_search.get("apiKey") != brave_env_key:
-    brave_web_search["apiKey"] = brave_env_key
+if set_plugin_config("brave", "webSearch", "apiKey", brave_env_key, "Brave search API key"):
     changed = True
-    print("[init] set Brave search API key from BRAVE_SEARCH_API_KEY")
-brave_has_key = bool(str(brave_web_search.get("apiKey", "")).strip())
+brave_entry = entries.setdefault("brave", {})
+brave_has_key = has_plugin_config_value("brave", "webSearch", "apiKey")
 if brave_has_key:
     if brave_entry.get("enabled") is not True:
         brave_entry["enabled"] = True
         changed = True
         print("[init] enabled plugin brave")
-    if search.get("provider") != "brave":
-        search["provider"] = "brave"
-        changed = True
-        print("[init] set tools.web.search.provider = brave")
-elif search.get("provider") != "duckduckgo":
-    search["provider"] = "duckduckgo"
+
+if set_plugin_config("exa", "webSearch", "apiKey", env_value("EXA_API_KEY"), "Exa API key"):
     changed = True
-    print("[init] set tools.web.search.provider = duckduckgo")
+if set_plugin_config("exa", "webSearch", "baseUrl", env_value("EXA_BASE_URL"), "Exa base URL"):
+    changed = True
+
+firecrawl_key = env_value("FIRECRAWL_API_KEY")
+firecrawl_base_url = env_value("FIRECRAWL_BASE_URL")
+if set_plugin_config("firecrawl", "webSearch", "apiKey", firecrawl_key, "Firecrawl search API key"):
+    changed = True
+if set_plugin_config("firecrawl", "webFetch", "apiKey", firecrawl_key, "Firecrawl fetch API key"):
+    changed = True
+if set_plugin_config("firecrawl", "webSearch", "baseUrl", firecrawl_base_url, "Firecrawl search base URL"):
+    changed = True
+if set_plugin_config("firecrawl", "webFetch", "baseUrl", firecrawl_base_url, "Firecrawl fetch base URL"):
+    changed = True
+
+if set_plugin_config("tavily", "webSearch", "apiKey", env_value("TAVILY_API_KEY"), "Tavily API key"):
+    changed = True
+if set_plugin_config("tavily", "webSearch", "baseUrl", env_value("TAVILY_BASE_URL"), "Tavily base URL"):
+    changed = True
+
+perplexity_key = env_value("PERPLEXITY_API_KEY") or env_value("OPENROUTER_API_KEY")
+if set_plugin_config("perplexity", "webSearch", "apiKey", perplexity_key, "Perplexity/OpenRouter API key"):
+    changed = True
+if set_plugin_config("perplexity", "webSearch", "baseUrl", env_value("PERPLEXITY_BASE_URL"), "Perplexity base URL"):
+    changed = True
+if set_plugin_config("perplexity", "webSearch", "model", env_value("PERPLEXITY_MODEL"), "Perplexity model"):
+    changed = True
+
+if set_plugin_config("searxng", "webSearch", "baseUrl", env_value("SEARXNG_BASE_URL"), "SearXNG base URL"):
+    changed = True
+if set_plugin_config("searxng", "webSearch", "categories", env_value("SEARXNG_CATEGORIES"), "SearXNG categories"):
+    changed = True
+if set_plugin_config("searxng", "webSearch", "language", env_value("SEARXNG_LANGUAGE"), "SearXNG language"):
+    changed = True
+
+provider_ready = {
+    "brave": brave_has_key,
+    "exa": has_plugin_config_value("exa", "webSearch", "apiKey"),
+    "firecrawl": has_plugin_config_value("firecrawl", "webSearch", "apiKey"),
+    "tavily": has_plugin_config_value("tavily", "webSearch", "apiKey"),
+    "perplexity": has_plugin_config_value("perplexity", "webSearch", "apiKey"),
+    "searxng": has_plugin_config_value("searxng", "webSearch", "baseUrl"),
+    "duckduckgo": True,
+}
+for provider_id, ready in provider_ready.items():
+    if ready and provider_id != "duckduckgo":
+        if ensure_plugin_enabled(provider_id):
+            changed = True
+
+search_priority = ["brave", "exa", "tavily", "perplexity", "firecrawl", "searxng", "duckduckgo"]
+requested_provider = env_value("OPENCLAW_WEB_SEARCH_PROVIDER").lower()
+if requested_provider:
+    if requested_provider in provider_ready and provider_ready[requested_provider]:
+        selected_provider = requested_provider
+    else:
+        selected_provider = next(provider for provider in search_priority if provider_ready[provider])
+        print(f"[init] WARNING: OPENCLAW_WEB_SEARCH_PROVIDER={requested_provider} is not configured; using {selected_provider}")
+else:
+    selected_provider = next(provider for provider in search_priority if provider_ready[provider])
+if search.get("provider") != selected_provider:
+    search["provider"] = selected_provider
+    changed = True
+    print(f"[init] set tools.web.search.provider = {selected_provider}")
+
+firecrawl_fetch_ready = has_plugin_config_value("firecrawl", "webFetch", "apiKey")
+if firecrawl_fetch_ready:
+    if ensure_plugin_enabled("firecrawl"):
+        changed = True
+    if fetch.get("provider") != "firecrawl":
+        fetch["provider"] = "firecrawl"
+        changed = True
+        print("[init] set tools.web.fetch.provider = firecrawl")
+elif fetch.get("provider") == "firecrawl":
+    del fetch["provider"]
+    changed = True
+    print("[init] removed tools.web.fetch.provider because Firecrawl is not configured")
 if tools.get("toolSearch") is not False:
     tools["toolSearch"] = False
     changed = True
