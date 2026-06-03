@@ -1,42 +1,13 @@
 #!/usr/bin/env bash
 # init.sh — runs on every container boot before the Node server starts.
-# /data is the Railway persistent volume, so anything installed there survives redeploys.
+# /data is the provider-mounted persistent volume, so runtime state survives redeploys.
 set -euo pipefail
 
 log() { echo "[init] $*"; }
 
-# ── Homebrew ──────────────────────────────────────────────────────────────────
-# Homebrew on Linux running as root always installs to /home/linuxbrew/.linuxbrew
-# regardless of HOMEBREW_PREFIX. We work around this by symlinking /home/linuxbrew
-# → /data/linuxbrew so brew's default path lands on the persistent volume.
-BREW_DATA_DIR="/data/linuxbrew"
-BREW_BIN="/home/linuxbrew/.linuxbrew/bin/brew"
-
-mkdir -p "$BREW_DATA_DIR"
-ln -sfn "$BREW_DATA_DIR" /home/linuxbrew
-
-if [ ! -x "$BREW_BIN" ]; then
-  log "Installing Homebrew (first boot, this takes a few minutes)..."
-  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  log "Homebrew installed."
-else
-  log "Homebrew already present — skipping install."
-fi
-
-# ── brew-managed tools ────────────────────────────────────────────────────────
-# Install on first boot; persisted to /data/linuxbrew across redeploys.
-for pkg in neovim; do
-  if ! "$BREW_BIN" list --formula "$pkg" &>/dev/null; then
-    log "Installing $pkg via brew..."
-    "$BREW_BIN" install "$pkg"
-  else
-    log "$pkg already installed via brew — skipping."
-  fi
-done
-
 # ── Tailscale ─────────────────────────────────────────────────────────────────
 # Persist Tailscale state to /data so auth survives redeploys.
-# Set TS_AUTHKEY in Railway variables (reusable key, tagged tag:server).
+# Set TS_AUTHKEY in host secrets (reusable key, tagged tag:server).
 TS_STATE_DIR="/data/tailscale"
 TS_SOCK="/var/run/tailscale/tailscaled.sock"
 mkdir -p "$TS_STATE_DIR" /var/run/tailscale
@@ -66,14 +37,42 @@ if tailscale status &>/dev/null; then
 fi
 
 # ── openclaw config patches ───────────────────────────────────────────────────
-# - gateway.trustedProxies = ["loopback"] for Railway reverse proxy
+# - gateway.trustedProxies = ["loopback"] for reverse proxies
 # - gateway.tailscale.mode = "serve" for tailnet-only dashboard access
 # - codex-lb providers for OpenClaw model traffic
-OPENCLAW_CFG="/data/.clawdbot/openclaw.json"
+OPENCLAW_STATE_DIR="${OPENCLAW_STATE_DIR:-/data/.openclaw}"
+OPENCLAW_WORKSPACE_DIR="${OPENCLAW_WORKSPACE_DIR:-/data/workspace}"
+OPENCLAW_CFG="${OPENCLAW_STATE_DIR}/openclaw.json"
+
+if [ ! -f "$OPENCLAW_CFG" ] && command -v openclaw >/dev/null 2>&1; then
+  log "OpenClaw config not found; running non-interactive onboarding with auth-choice=skip..."
+  mkdir -p "$OPENCLAW_STATE_DIR" "$OPENCLAW_WORKSPACE_DIR"
+  openclaw onboard \
+    --non-interactive \
+    --accept-risk \
+    --json \
+    --no-install-daemon \
+    --skip-health \
+    --skip-channels \
+    --skip-skills \
+    --skip-search \
+    --workspace "$OPENCLAW_WORKSPACE_DIR" \
+    --gateway-bind loopback \
+    --gateway-port 18789 \
+    --gateway-auth token \
+    --gateway-token "${OPENCLAW_GATEWAY_TOKEN:-}" \
+    --flow quickstart \
+    --auth-choice skip \
+    --suppress-gateway-token-output \
+    || log "WARNING: OpenClaw onboarding failed; /setup can still be used manually."
+fi
+
 if [ -f "$OPENCLAW_CFG" ]; then
+  export OPENCLAW_CFG
   python3 - << 'PYEOF'
 import json
-path = "/data/.clawdbot/openclaw.json"
+import os
+path = os.environ["OPENCLAW_CFG"]
 with open(path) as f:
     cfg = json.load(f)
 changed = False
@@ -271,13 +270,13 @@ PYEOF
 fi
 
 # ── chezmoi dotfiles ──────────────────────────────────────────────────────────
-# CHEZMOI_DOTFILES_REPO: set this Railway variable to your dotfiles repo,
+# CHEZMOI_DOTFILES_REPO: set this host secret to your dotfiles repo,
 # e.g. "danieljvdm/dotfiles".
 # CHEZMOI_GITHUB_ACCESS_TOKEN: set if the repo is private.
 CHEZMOI_SOURCE="/data/.local/share/chezmoi"
 
 if [ -n "${CHEZMOI_DOTFILES_REPO:-}" ]; then
-  # Railway may preserve the chezmoi source across image/user changes, which can
+  # The host may preserve the chezmoi source across image/user changes, which can
   # make Git reject it as a dubious-ownership repo on the next boot. Trust it at
   # the system level because chezmoi owns /root/.gitconfig and may rewrite it.
   if command -v git >/dev/null 2>&1; then
@@ -311,12 +310,12 @@ if [ -n "${CHEZMOI_DOTFILES_REPO:-}" ]; then
   }
 else
   log "CHEZMOI_DOTFILES_REPO not set — skipping dotfiles setup."
-  log "Set it in Railway variables to enable dotfiles on boot."
+  log "Set it in host secrets to enable dotfiles on boot."
 fi
 
 # ── codex-lb ─────────────────────────────────────────────────────────────────
 # The shared chezmoi config points Codex/OpenCode at 127.0.0.1:2455. On macOS
-# launchd starts codex-lb; on Railway we run it as a background process here.
+# launchd starts codex-lb; in this container we run it as a background process.
 case "${CODEX_LB_ENABLED:-1}" in
   0|false|FALSE|no|NO)
     log "codex-lb disabled by CODEX_LB_ENABLED."

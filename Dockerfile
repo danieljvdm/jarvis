@@ -20,10 +20,9 @@ ENV NODE_ENV=production
 
 # System packages:
 #   - tini: PID 1 / signal handling
-#   - build-essential, file, procps: Homebrew build requirements
+#   - build-essential, file, procps: native package build/runtime diagnostics
 #   - tmux, ripgrep, fzf: dev tools (baked in so they're always available)
 #   - gnupg, curl: needed for 1Password CLI apt repo setup
-# neovim is installed via brew at runtime (init.sh) so it persists and stays current.
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -41,6 +40,7 @@ RUN apt-get update \
     tmux \
     ripgrep \
     fzf \
+    neovim \
     zsh \
   && curl -sS https://downloads.1password.com/linux/keys/1password.asc \
     | gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg \
@@ -66,10 +66,13 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 # pnpm — used by openclaw update and skill installs
 RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
-# All user-installed tools persist to /data (Railway volume).
+# qmd — semantic search CLI/MCP for the Obsidian vault. Install it in the image
+# so first boot can start the HTTP wrapper before Fly's health check window ends.
+RUN npm install -g @tobilu/qmd && npm cache clean --force
+
+# User-installed tools and config persist to /data.
 #
 # npm/pnpm globals  -> /data/npm, /data/pnpm
-# Homebrew          -> /data/homebrew  (installed at runtime on first boot)
 # chezmoi source    -> /data/.local/share/chezmoi  (cloned at runtime on first boot)
 ENV XDG_CONFIG_HOME=/data/.config
 ENV XDG_CACHE_HOME=/data/.cache
@@ -77,11 +80,7 @@ ENV NPM_CONFIG_PREFIX=/data/npm
 ENV NPM_CONFIG_CACHE=/data/npm-cache
 ENV PNPM_HOME=/data/pnpm
 ENV PNPM_STORE_DIR=/data/pnpm-store
-ENV HOMEBREW_NO_AUTO_UPDATE=1
-ENV HOMEBREW_NO_ANALYTICS=1
-# Brew on Linux/root always installs to /home/linuxbrew/.linuxbrew; init.sh symlinks
-# /home/linuxbrew → /data/linuxbrew so this path lands on the persistent volume.
-ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/data/npm/bin:/data/pnpm:${PATH}"
+ENV PATH="/data/npm/bin:/data/pnpm:${PATH}"
 
 WORKDIR /app
 

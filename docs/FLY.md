@@ -13,13 +13,13 @@ brew install flyctl
 fly auth login
 ```
 
-The app name in `fly.toml` is `jarvis-danvdm`. Change it if the name is taken.
+The app name in `fly.toml` is `openclaw-broken-fire-2366`.
 
 ## Create the App
 
 ```bash
-fly launch --copy-config --name jarvis-danvdm --no-deploy
-fly volumes create jarvis_data --size 20 --region iad
+fly launch --copy-config --name openclaw-broken-fire-2366 --no-deploy
+fly volumes create jarvis_data --size 20 --region ewr
 ```
 
 Set secrets. Use the same values as Railway where possible:
@@ -68,7 +68,7 @@ Upload it to Fly:
 ```bash
 fly ssh sftp put /tmp/jarvis-data.tgz /tmp/jarvis-data.tgz
 fly ssh console -C 'cd / && tar -xzf /tmp/jarvis-data.tgz && rm /tmp/jarvis-data.tgz'
-fly apps restart jarvis-danvdm
+fly apps restart openclaw-broken-fire-2366
 ```
 
 Then verify:

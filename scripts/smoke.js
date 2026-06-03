@@ -167,7 +167,7 @@ function run(opts) {
     return spawnSync("railway", ["ssh", script], { stdio: "inherit" });
   }
   if (opts.mode === "fly") {
-    const args = ["ssh", "console", "-C", script];
+    const args = ["ssh", "console", "-C", `bash -lc ${shellQuote(script)}`];
     if (opts.app) args.push("--app", opts.app);
     return spawnSync("fly", args, { stdio: "inherit" });
   }

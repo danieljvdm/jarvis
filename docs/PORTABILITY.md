@@ -15,7 +15,7 @@ without changing application code. Hosting adapters should satisfy this contract
   - `/data/.codex-lb` for Codex account/session state
   - `/data/.local/share/chezmoi` for dotfiles source
   - `/data/.config` and `/data/.cache` for tool config/cache
-- Provide outbound network access for package installs, Tailscale, GitHub,
+- Provide outbound network access for Tailscale, GitHub,
   model providers, and OpenClaw plugins.
 - Run `/app/src/start.sh` as the container command.
 
